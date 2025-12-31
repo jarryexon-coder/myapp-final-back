@@ -1,0 +1,66 @@
+{
+  "expo": {
+    "name": "NBA Fantasy App",
+    "slug": "nba-fantasy-app",
+    "version": "1.0.0",
+    "runtimeVersion": "1.0.0",
+    "scheme": "nbafantasyapp",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.jerryjiya.myapp-new",
+      "buildNumber": "1",
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.jerryjiya.myapp_new",
+      "googleServicesFile": "./google-services.json"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static",
+            "deploymentTarget": "15.1"
+          },
+          "android": {
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "buildToolsVersion": "35.0.0",
+            "gradleVersion": "8.7",
+            "agpVersion": "8.4.0",
+            "kotlinVersion": "1.9.25",
+            "composeCompilerVersion": "1.5.14",
+            "extraPackagingOptions": {
+              "pickFirsts": ["**/libc++_shared.so"]
+            }
+          }
+        }
+      ],
+      "expo-font",
+      "expo-asset",
+      "expo-router"
+    ]
+  }
+}

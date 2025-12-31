@@ -1,0 +1,322 @@
+// Production-ready API service
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Application from 'expo-application';
+import { Platform } from 'react-native';
+
+class ApiService {
+  constructor() {
+    // Production endpoint
+    this.BASE_URL = 'https://pleasing-determination-production.up.railway.app';
+    this.API_VERSION = 'v1';
+    this.CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+    
+    this.cache = new Map();
+    this.requestQueue = new Map();
+  }
+
+  // Production headers with security
+  getHeaders = async () => {
+    const headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'X-App-Version': Application.nativeApplicationVersion || '1.0.0',
+      'X-Platform': Platform.OS,
+      'X-Device-Id': await this.getDeviceId(),
+      'X-Request-ID': this.generateRequestId(),
+    };
+
+    // Add auth token if exists
+    const token = await AsyncStorage.getItem('auth_token');
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    return headers;
+  };
+
+  getDeviceId = async () => {
+    let deviceId = await AsyncStorage.getItem('device_id');
+    if (!deviceId) {
+      deviceId = `${Platform.OS}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      await AsyncStorage.setItem('device_id', deviceId);
+    }
+    return deviceId;
+  };
+
+  generateRequestId = () => {
+    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  };
+
+  // Production analytics endpoint
+  trackAnalyticsEvent = async (eventName, eventData = {}) => {
+    try {
+      const endpoint = `${this.BASE_URL}/api/${this.API_VERSION}/analytics/track`;
+      
+      const payload = {
+        event: eventName,
+        data: {
+          ...eventData,
+          timestamp: new Date().toISOString(),
+          session_id: await AsyncStorage.getItem('session_id'),
+          user_id: await AsyncStorage.getItem('user_id'),
+          device_id: await this.getDeviceId(),
+          platform: Platform.OS,
+          app_version: Application.nativeApplicationVersion || '1.0.0',
+        },
+      };
+
+      // Fire and forget - don't await in production
+      this.sendAnalytics(payload);
+      
+    } catch (error) {
+      // Silent fail for analytics
+      console.debug('Analytics error:', error.message);
+    }
+  };
+
+  // Batch analytics for efficiency
+  sendAnalytics = async (payload) => {
+    try {
+      // Get batch from storage
+      let batch = JSON.parse(await AsyncStorage.getItem('analytics_batch') || '[]');
+      batch.push(payload);
+      
+      // If batch is full or old, send it
+      if (batch.length >= 10 || 
+          (Date.now() - (JSON.parse(await AsyncStorage.getItem('last_batch_sent') || '0')) > 30000)) {
+        
+        const response = await axios.post(
+          `${this.BASE_URL}/api/${this.API_VERSION}/analytics/batch`,
+          { events: batch },
+          { headers: await this.getHeaders() }
+        );
+        
+        if (response.status === 200) {
+          await AsyncStorage.setItem('analytics_batch', '[]');
+          await AsyncStorage.setItem('last_batch_sent', Date.now().toString());
+        }
+      } else {
+        // Save batch for later
+        await AsyncStorage.setItem('analytics_batch', JSON.stringify(batch));
+      }
+    } catch (error) {
+      // Retry logic
+      this.retryAnalytics(payload);
+    }
+  };
+
+  retryAnalytics = async (payload, attempt = 1) => {
+    const maxRetries = 3;
+    if (attempt > maxRetries) {
+      return;
+    }
+    
+    setTimeout(async () => {
+      try {
+        await this.sendAnalytics(payload);
+      } catch (error) {
+        this.retryAnalytics(payload, attempt + 1);
+      }
+    }, 1000 * attempt);
+  };
+
+  // Enhanced request with retry logic
+  request = async (method, endpoint, data = null, options = {}) => {
+    const cacheKey = `${method}:${endpoint}:${JSON.stringify(data)}`;
+    const startTime = Date.now(); // Fixed: added startTime variable
+    
+    // Check cache if GET request
+    if (method === 'GET' && !options.skipCache) {
+      const cached = this.cache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
+        return cached.data;
+      }
+    }
+
+    // Request queue to prevent duplicate simultaneous requests
+    if (this.requestQueue.has(cacheKey)) {
+      return this.requestQueue.get(cacheKey);
+    }
+
+    const requestPromise = (async () => {
+      try {
+        const config = {
+          method,
+          url: `${this.BASE_URL}${endpoint}`,
+          headers: await this.getHeaders(),
+          timeout: options.timeout || 10000, // 10 seconds default
+          ...options,
+        };
+
+        if (data) {
+          config.data = data;
+        }
+
+        const response = await axios(config);
+        
+        // Cache successful GET responses
+        if (method === 'GET' && response.status === 200 && !options.skipCache) {
+          this.cache.set(cacheKey, {
+            data: response.data,
+            timestamp: Date.now(),
+          });
+        }
+
+        // Track successful request
+        this.trackAnalyticsEvent('api_request_success', {
+          endpoint,
+          method,
+          status: response.status,
+          duration: Date.now() - startTime,
+        });
+
+        return response.data;
+
+      } catch (error) {
+        // Enhanced error handling
+        const errorData = {
+          endpoint,
+          method,
+          status: error.response?.status,
+          message: error.message,
+        };
+
+        this.trackAnalyticsEvent('api_request_error', errorData);
+
+        // Retry logic for 5xx errors
+        if (error.response?.status >= 500 && options.retry !== false) {
+          return this.retryRequest(method, endpoint, data, options);
+        }
+
+        throw {
+          message: error.response?.data?.message || error.message,
+          status: error.response?.status,
+          data: error.response?.data,
+        };
+      } finally {
+        // Clean up request queue
+        setTimeout(() => {
+          this.requestQueue.delete(cacheKey);
+        }, 1000);
+      }
+    })();
+
+    this.requestQueue.set(cacheKey, requestPromise);
+    return requestPromise;
+  };
+
+  // Retry logic
+  retryRequest = async (method, endpoint, data, options, attempt = 1) => {
+    const maxRetries = options.maxRetries || 3;
+    const baseDelay = options.retryDelay || 1000;
+
+    if (attempt > maxRetries) {
+      throw new Error('Max retries exceeded');
+    }
+
+    // Exponential backoff
+    const delay = baseDelay * Math.pow(2, attempt - 1);
+    await new Promise(resolve => setTimeout(resolve, delay));
+
+    return this.request(method, endpoint, data, {
+      ...options,
+      retry: attempt < maxRetries,
+    });
+  };
+
+  // Health check with detailed metrics
+  checkServerStatus = async () => {
+    const startTime = Date.now();
+    try {
+      const response = await this.request('GET', '/health');
+      const latency = Date.now() - startTime;
+      
+      return {
+        ...response,
+        latency,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      return {
+        service: 'NBA Analytics Backend',
+        status: 'unhealthy',
+        version: 'unknown',
+        latency: Date.now() - startTime,
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      };
+    }
+  };
+
+  // Subscription analytics
+  trackSubscriptionEvent = async (eventType, subscriptionData) => {
+    return this.trackAnalyticsEvent(`subscription_${eventType}`, {
+      ...subscriptionData,
+      timestamp: new Date().toISOString(),
+      revenue: subscriptionData.price || 0,
+      currency: 'USD',
+    });
+  };
+
+  // User behavior analytics
+  trackScreenView = async (screenName, params = {}) => {
+    return this.trackAnalyticsEvent('screen_view', {
+      screen: screenName,
+      ...params,
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  trackButtonClick = async (buttonName, location = '') => {
+    return this.trackAnalyticsEvent('button_click', {
+      button: buttonName,
+      location,
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  // RevenueCat webhook handler
+  handleRevenueCatWebhook = async (webhookData) => {
+    try {
+      // Store in local database/queue
+      const webhooks = JSON.parse(await AsyncStorage.getItem('pending_webhooks') || '[]');
+      webhooks.push({
+        ...webhookData,
+        received_at: new Date().toISOString(),
+        processed: false,
+      });
+      await AsyncStorage.setItem('pending_webhooks', JSON.stringify(webhooks.slice(-100))); // Keep last 100
+      
+      // Process in background
+      this.processWebhooks();
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Webhook handling error:', error);
+      return { success: false, error: error.message };
+    }
+  };
+
+  processWebhooks = async () => {
+    try {
+      const webhooks = JSON.parse(await AsyncStorage.getItem('pending_webhooks') || '[]');
+      const unprocessed = webhooks.filter(w => !w.processed);
+      
+      for (const webhook of unprocessed) {
+        // Send to your analytics backend
+        await this.trackAnalyticsEvent(`revenuecat_${webhook.event.type}`, webhook);
+        
+        // Mark as processed
+        webhook.processed = true;
+        webhook.processed_at = new Date().toISOString();
+      }
+      
+      await AsyncStorage.setItem('pending_webhooks', JSON.stringify(webhooks));
+    } catch (error) {
+      console.error('Webhook processing error:', error);
+    }
+  };
+}
+
+export default new ApiService();
