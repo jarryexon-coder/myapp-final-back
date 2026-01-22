@@ -1,0 +1,28 @@
+// src/navigation/AppNavigator.js - Main app navigator with login
+import React from 'react';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import GroupedTabNavigator from './GroupedTabNavigator';
+import LoginScreen from '../screens/LoginScreen';
+
+const Stack = createNativeStackNavigator();
+
+const AppNavigator = () => {
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerShown: false,
+      }}
+    >
+      <Stack.Screen name="MainTabs" component={GroupedTabNavigator} />
+      <Stack.Screen 
+        name="Login" 
+        component={LoginScreen}
+        options={{
+          presentation: 'modal',
+        }}
+      />
+    </Stack.Navigator>
+  );
+};
+
+export default AppNavigator;
