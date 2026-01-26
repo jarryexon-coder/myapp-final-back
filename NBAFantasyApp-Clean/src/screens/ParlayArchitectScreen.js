@@ -19,14 +19,971 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAppNavigation } from '../navigation/NavigationHelper';
-import { useSearch } from '../providers/SearchProvider';  
-import SearchBar from '../components/SearchBar';
-import { useSportsData } from '../hooks/useSportsData';
+
+import { useSearch } from '../providers/SearchProvider';
+
+// Fix 4: Import data structures
+import { samplePlayers } from '../data/players';
+import { teams } from '../data/teams';
+import { statCategories } from '../data/stats';
+
+// Fix 5: Import backend API
+import { playerApi } from '../services/api';
+
 import { useAnalytics } from '../hooks/useAnalytics';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { logAnalyticsEvent, logScreenView } from '../services/firebase';
 
 const { width } = Dimensions.get('window');
+
+// Fix 2: Enhanced 3-Leg Parlay Generator Component - COMPLETELY DIFFERENT from DailyPicks
+const ThreeLegParlayGenerator = ({ 
+  onGenerate, 
+  isGenerating, 
+  selectedSport = 'All',
+  parlayLegs = 3,
+  autoBalanceEnabled = true 
+}) => {
+  const [generatedParlays, setGeneratedParlays] = useState([]);
+  const [selectedFilters, setSelectedFilters] = useState({
+    type: 'mixed',
+    riskLevel: 'moderate',
+    timeframe: 'tonight'
+  });
+
+  useEffect(() => {
+    loadGeneratedParlays();
+  }, []);
+
+  const loadGeneratedParlays = async () => {
+    try {
+      const storedParlays = await AsyncStorage.getItem('generated_parlays');
+      if (storedParlays) {
+        setGeneratedParlays(JSON.parse(storedParlays));
+      }
+    } catch (error) {
+      console.error('Error loading generated parlays:', error);
+    }
+  };
+
+  // Generate completely different parlays focused on 3-leg combos
+  const generateSmartParlays = (filters = {}) => {
+    const sportsList = selectedSport === 'All' 
+      ? ['NBA', 'NFL', 'NHL', 'MLB'] 
+      : [selectedSport];
+    
+    const parlayTypes = {
+      mixed: ['Cross-Sport Value', 'Multi-Sport Smash', 'Spread Mix'],
+      same_game: ['Same-Game Parlay', 'Correlated Plays', 'Team Stack'],
+      player_props: ['Player Prop Trio', 'Stat Sheet Parlay', 'Performance Combo'],
+      totals: ['Over/Under Special', 'Total Hunter', 'Score Predictor']
+    };
+
+    const riskLevels = {
+      conservative: { minOdds: '+150', maxOdds: '+300', confidence: 70 },
+      moderate: { minOdds: '+300', maxOdds: '+600', confidence: 65 },
+      aggressive: { minOdds: '+600', maxOdds: '+1200', confidence: 55 }
+    };
+
+    const timeframeData = {
+      tonight: { matches: 12, freshness: 'Live Tonight' },
+      tomorrow: { matches: 8, freshness: 'Tomorrow' },
+      weekend: { matches: 15, freshness: 'Weekend Special' }
+    };
+
+    const selectedType = filters.type || 'mixed';
+    const selectedRisk = filters.riskLevel || 'moderate';
+    const selectedTimeframe = filters.timeframe || 'tonight';
+
+    const parlays = [];
+
+    // Generate 3 different parlay options
+    for (let i = 0; i < 3; i++) {
+      // Determine sports for this parlay
+      let parlaySports = [];
+      if (selectedType === 'mixed') {
+        // Mix different sports
+        parlaySports = sportsList.length >= 3 
+          ? [...sportsList].slice(0, 3)
+          : [...sportsList, ...sportsList, ...sportsList].slice(0, 3);
+      } else if (selectedType === 'same_game') {
+        // Same sport, same game
+        parlaySports = Array(3).fill(sportsList[0] || 'NBA');
+      } else {
+        // Random mix
+        parlaySports = Array(3).fill().map(() => 
+          sportsList[Math.floor(Math.random() * sportsList.length)] || 'NBA'
+        );
+      }
+
+      // Generate individual legs
+      const legs = [];
+      for (let j = 0; j < parlayLegs; j++) {
+        const sport = parlaySports[j];
+        const legType = getLegType(sport, selectedType, j);
+        
+        legs.push({
+          id: `${i}-${j}`,
+          sport,
+          pick: generateLegPick(sport, legType),
+          odds: generateOdds(selectedRisk),
+          confidence: generateConfidence(selectedRisk, legType),
+          edge: `+${(8 + Math.random() * 12).toFixed(1)}%`,
+          analysis: getLegAnalysis(sport, legType),
+          type: legType,
+          keyStat: getKeyStat(sport, legType),
+          matchup: getMatchup(sport)
+        });
+      }
+
+      // Calculate parlay details
+      const parlayOdds = calculateParlayOdds(legs);
+      const winProbability = calculateWinProbability(legs);
+      const expectedValue = calculateExpectedValue(legs, parlayOdds);
+
+      parlays.push({
+        id: `parlay-${Date.now()}-${i}`,
+        type: parlayTypes[selectedType][i % parlayTypes[selectedType].length],
+        legs,
+        totalOdds: parlayOdds,
+        winProbability: `${winProbability}%`,
+        expectedValue: expectedValue > 0 ? `+${expectedValue.toFixed(1)}%` : `${expectedValue.toFixed(1)}%`,
+        maxPayout: calculateMaxPayout(parlayOdds),
+        riskLevel: selectedRisk,
+        strategy: getStrategy(selectedType, selectedRisk),
+        correlation: calculateCorrelation(legs),
+        bestUsed: getBestUsage(selectedType, selectedRisk),
+        timestamp: timeframeData[selectedTimeframe].freshness,
+        confidenceScore: Math.round(winProbability * 0.7 + (100 - winProbability) * 0.3),
+        recommendedStake: getRecommendedStake(selectedRisk, winProbability)
+      });
+    }
+
+    return parlays;
+  };
+
+  // Helper functions for parlay generation
+  const getLegType = (sport, parlayType, index) => {
+    const types = {
+      NBA: ['Points', 'Assists', 'Rebounds', 'Threes', 'Double-Double', 'Moneyline'],
+      NFL: ['Passing Yards', 'Rushing Yards', 'Touchdowns', 'Receptions', 'Sacks', 'Moneyline'],
+      NHL: ['Points', 'Goals', 'Assists', 'Shots', 'Saves', 'Moneyline'],
+      MLB: ['Hits', 'RBIs', 'Strikeouts', 'Home Runs', 'Total Bases', 'Moneyline']
+    };
+    
+    if (parlayType === 'player_props') {
+      return types[sport]?.[index % types[sport].length] || 'Moneyline';
+    }
+    
+    const allTypes = ['Moneyline', 'Spread', 'Total', 'Player Prop', 'Team Prop'];
+    return allTypes[Math.floor(Math.random() * allTypes.length)];
+  };
+
+  const generateLegPick = (sport, legType) => {
+    const picks = {
+      NBA: {
+        'Points': ['Over 28.5 Points', 'Over 30.5 Points', 'Over 32.5 Points'],
+        'Assists': ['Over 7.5 Assists', 'Over 8.5 Assists', 'Over 9.5 Assists'],
+        'Rebounds': ['Over 10.5 Rebounds', 'Over 11.5 Rebounds', 'Over 12.5 Rebounds'],
+        'Moneyline': ['Moneyline Winner', 'Moneyline - Home', 'Moneyline - Away']
+      },
+      NFL: {
+        'Passing Yards': ['Over 250.5 Yards', 'Over 275.5 Yards', 'Over 300.5 Yards'],
+        'Touchdowns': ['Over 1.5 TDs', 'Over 2.5 TDs', 'Anytime TD Scorer'],
+        'Moneyline': ['Moneyline Winner', 'Moneyline - Favorite', 'Moneyline - Underdog']
+      },
+      NHL: {
+        'Points': ['Over 0.5 Points', 'Over 1.5 Points', 'Over 2.5 Points'],
+        'Goals': ['Anytime Goal Scorer', '2+ Goals', 'Power Play Goal'],
+        'Moneyline': ['Moneyline Winner', 'Moneyline - Regulation']
+      },
+      MLB: {
+        'Hits': ['Over 1.5 Hits', 'Over 2.5 Hits', '3+ Hits'],
+        'Strikeouts': ['Over 5.5 Ks', 'Over 6.5 Ks', 'Over 7.5 Ks'],
+        'Moneyline': ['Moneyline Winner', 'Moneyline - Run Line']
+      }
+    };
+
+    const sportPicks = picks[sport] || picks.NBA;
+    const typePicks = sportPicks[legType] || sportPicks.Moneyline;
+    return typePicks[Math.floor(Math.random() * typePicks.length)];
+  };
+
+  const generateOdds = (riskLevel) => {
+    const oddsRanges = {
+      conservative: ['-150', '-125', '-110', '+100'],
+      moderate: ['+120', '+140', '+160', '+180'],
+      aggressive: ['+200', '+250', '+300', '+350']
+    };
+    const range = oddsRanges[riskLevel] || oddsRanges.moderate;
+    return range[Math.floor(Math.random() * range.length)];
+  };
+
+  const generateConfidence = (riskLevel, legType) => {
+    const baseConfidence = {
+      conservative: 75,
+      moderate: 68,
+      aggressive: 60
+    }[riskLevel] || 68;
+
+    // Adjust based on leg type
+    const adjustments = {
+      'Moneyline': 5,
+      'Points': -2,
+      'Assists': -3,
+      'Touchdowns': -5,
+      'Anytime Goal Scorer': -8
+    };
+
+    return Math.max(55, Math.min(85, baseConfidence + (adjustments[legType] || 0)));
+  };
+
+  const getLegAnalysis = (sport, legType) => {
+    const analyses = {
+      NBA: {
+        'Points': 'Facing weak perimeter defense. Averaging 28.4 PPG last 10 games.',
+        'Assists': 'Primary playmaker with 35% usage rate. Teammates shooting 42% from 3.',
+        'Moneyline': 'Home court advantage. 8-2 record in last 10 home games.'
+      },
+      NFL: {
+        'Passing Yards': 'Opponent allows 265 YPG through air. Favorable weather conditions.',
+        'Touchdowns': 'Red zone efficiency at 68%. Target share in end zone: 32%.',
+        'Moneyline': 'Coming off bye week. Defense ranks top 10 in points allowed.'
+      }
+    };
+
+    return analyses[sport]?.[legType] || 'Strong value play with positive expected value.';
+  };
+
+  const calculateParlayOdds = (legs) => {
+    // Convert American odds to decimal, multiply, convert back
+    let decimalOdds = 1;
+    legs.forEach(leg => {
+      const odds = leg.odds;
+      let decimal;
+      if (odds.startsWith('+')) {
+        decimal = parseInt(odds.substring(1)) / 100 + 1;
+      } else if (odds.startsWith('-')) {
+        decimal = 100 / parseInt(odds.substring(1)) + 1;
+      } else {
+        decimal = 1; // Fallback
+      }
+      decimalOdds *= decimal;
+    });
+
+    // Convert back to American
+    if (decimalOdds >= 2) {
+      return `+${Math.round((decimalOdds - 1) * 100)}`;
+    } else {
+      return `-${Math.round(100 / (decimalOdds - 1))}`;
+    }
+  };
+
+  const calculateWinProbability = (legs) => {
+    const totalProbability = legs.reduce((acc, leg) => {
+      return acc * (leg.confidence / 100);
+    }, 1);
+    return Math.round(totalProbability * 100);
+  };
+
+  const calculateExpectedValue = (legs, parlayOdds) => {
+    const winProb = calculateWinProbability(legs) / 100;
+    let decimalOdds;
+    
+    if (parlayOdds.startsWith('+')) {
+      decimalOdds = parseInt(parlayOdds.substring(1)) / 100 + 1;
+    } else if (parlayOdds.startsWith('-')) {
+      decimalOdds = 100 / parseInt(parlayOdds.substring(1)) + 1;
+    } else {
+      decimalOdds = 1;
+    }
+
+    const ev = (winProb * (decimalOdds - 1) - (1 - winProb)) * 100;
+    return ev;
+  };
+
+  const calculateMaxPayout = (odds) => {
+    if (odds.startsWith('+')) {
+      const multiplier = parseInt(odds.substring(1)) / 100;
+      return `$${(100 * multiplier + 100).toFixed(0)} on $100`;
+    }
+    return `$${(100 * 2).toFixed(0)} on $100`;
+  };
+
+  const getStrategy = (type, risk) => {
+    const strategies = {
+      mixed: 'Diversify risk across multiple sports and markets',
+      same_game: 'Capitalize on game flow and correlation',
+      player_props: 'Target specific player performances',
+      totals: 'Focus on over/under trends and matchups'
+    };
+    return strategies[type] || 'Balanced approach for optimal value';
+  };
+
+  const calculateCorrelation = (legs) => {
+    const sports = legs.map(leg => leg.sport);
+    const uniqueSports = [...new Set(sports)];
+    return uniqueSports.length > 1 ? 'Low (Diversified)' : 'High (Correlated)';
+  };
+
+  const getBestUsage = (type, risk) => {
+    return risk === 'aggressive' ? 'Bankroll Builder' : 
+           risk === 'moderate' ? 'Weekly Play' : 'Cash Flow';
+  };
+
+  const getRecommendedStake = (risk, winProb) => {
+    const base = winProb / 100;
+    const riskMultiplier = {
+      conservative: 0.02,
+      moderate: 0.015,
+      aggressive: 0.01
+    }[risk] || 0.015;
+    
+    return `${(base * riskMultiplier * 100).toFixed(1)}% of bankroll`;
+  };
+
+  const getKeyStat = (sport, legType) => {
+    const stats = {
+      NBA: 'Player averaging 28.4 PPG vs opponent',
+      NFL: 'Team allows 265 passing YPG (28th)',
+      NHL: '35% power play conversion rate',
+      MLB: 'Batters hitting .312 vs lefties'
+    };
+    return stats[sport] || 'Key trend supporting this pick';
+  };
+
+  const getMatchup = (sport) => {
+    const matchups = {
+      NBA: 'GSW @ LAL (10:30 PM ET)',
+      NFL: 'KC vs BUF (8:15 PM ET)',
+      NHL: 'BOS @ TOR (7:00 PM ET)',
+      MLB: 'NYY vs BOS (7:05 PM ET)'
+    };
+    return matchups[sport] || 'Featured matchup';
+  };
+
+  const handleGenerate = async () => {
+    const newParlays = generateSmartParlays(selectedFilters);
+    setGeneratedParlays(newParlays);
+    
+    try {
+      await AsyncStorage.setItem('generated_parlays', JSON.stringify(newParlays));
+    } catch (error) {
+      console.error('Error saving parlays:', error);
+    }
+    
+    onGenerate?.(newParlays);
+  };
+
+  const renderParlayItem = (parlay) => (
+    <View key={parlay.id} style={parlayGeneratorStyles.parlayCard}>
+      <View style={parlayGeneratorStyles.parlayHeader}>
+        <View style={parlayGeneratorStyles.typeBadge}>
+          <Ionicons name="git-merge" size={14} color="#f59e0b" />
+          <Text style={parlayGeneratorStyles.typeText}>{parlay.type}</Text>
+        </View>
+        <View style={[
+          parlayGeneratorStyles.riskBadge,
+          parlay.riskLevel === 'conservative' ? parlayGeneratorStyles.riskConservative :
+          parlay.riskLevel === 'moderate' ? parlayGeneratorStyles.riskModerate :
+          parlayGeneratorStyles.riskAggressive
+        ]}>
+          <Text style={parlayGeneratorStyles.riskText}>{parlay.riskLevel.toUpperCase()}</Text>
+        </View>
+      </View>
+      
+      <Text style={parlayGeneratorStyles.parlayTitle}>{parlayLegs}-Leg Parlay</Text>
+      
+      {/* Legs display */}
+      <View style={parlayGeneratorStyles.legsContainer}>
+        {parlay.legs.map((leg, index) => (
+          <View key={index} style={parlayGeneratorStyles.legItem}>
+            <View style={parlayGeneratorStyles.legHeader}>
+              <View style={parlayGeneratorStyles.legSport}>
+                <Ionicons 
+                  name={leg.sport === 'NBA' ? 'basketball' : 
+                        leg.sport === 'NFL' ? 'american-football' :
+                        leg.sport === 'NHL' ? 'ice-cream' : 'baseball'} 
+                  size={12} 
+                  color="#3b82f6" 
+                />
+                <Text style={parlayGeneratorStyles.legSportText}>{leg.sport}</Text>
+              </View>
+              <Text style={parlayGeneratorStyles.legType}>{leg.type}</Text>
+            </View>
+            <Text style={parlayGeneratorStyles.legPick}>{leg.pick}</Text>
+            <View style={parlayGeneratorStyles.legFooter}>
+              <Text style={parlayGeneratorStyles.legOdds}>{leg.odds}</Text>
+              <Text style={parlayGeneratorStyles.legConfidence}>{leg.confidence}%</Text>
+            </View>
+          </View>
+        ))}
+      </View>
+      
+      {/* Parlay metrics */}
+      <View style={parlayGeneratorStyles.metricsGrid}>
+        <View style={parlayGeneratorStyles.metricItem}>
+          <Text style={parlayGeneratorStyles.metricLabel}>Total Odds</Text>
+          <Text style={parlayGeneratorStyles.metricValue}>{parlay.totalOdds}</Text>
+        </View>
+        <View style={parlayGeneratorStyles.metricItem}>
+          <Text style={parlayGeneratorStyles.metricLabel}>Win Prob</Text>
+          <Text style={parlayGeneratorStyles.metricValue}>{parlay.winProbability}</Text>
+        </View>
+        <View style={parlayGeneratorStyles.metricItem}>
+          <Text style={parlayGeneratorStyles.metricLabel}>Expected Value</Text>
+          <Text style={[
+            parlayGeneratorStyles.metricValue,
+            {color: parlay.expectedValue.startsWith('+') ? '#10b981' : '#ef4444'}
+          ]}>
+            {parlay.expectedValue}
+          </Text>
+        </View>
+        <View style={parlayGeneratorStyles.metricItem}>
+          <Text style={parlayGeneratorStyles.metricLabel}>Max Payout</Text>
+          <Text style={parlayGeneratorStyles.metricValue}>{parlay.maxPayout}</Text>
+        </View>
+      </View>
+      
+      {/* Strategy info */}
+      <View style={parlayGeneratorStyles.strategyInfo}>
+        <View style={parlayGeneratorStyles.strategyRow}>
+          <Text style={parlayGeneratorStyles.strategyLabel}>Strategy:</Text>
+          <Text style={parlayGeneratorStyles.strategyValue}>{parlay.strategy}</Text>
+        </View>
+        <View style={parlayGeneratorStyles.strategyRow}>
+          <Text style={parlayGeneratorStyles.strategyLabel}>Correlation:</Text>
+          <Text style={parlayGeneratorStyles.strategyValue}>{parlay.correlation}</Text>
+        </View>
+        <View style={parlayGeneratorStyles.strategyRow}>
+          <Text style={parlayGeneratorStyles.strategyLabel}>Best Used For:</Text>
+          <Text style={parlayGeneratorStyles.strategyValue}>{parlay.bestUsed}</Text>
+        </View>
+      </View>
+      
+      {/* Bankroll management */}
+      <View style={parlayGeneratorStyles.bankrollSection}>
+        <Ionicons name="wallet" size={14} color="#8b5cf6" />
+        <Text style={parlayGeneratorStyles.bankrollText}>
+          Confidence Score: {parlay.confidenceScore}/100 • 
+          Recommended Stake: {parlay.recommendedStake}
+        </Text>
+      </View>
+      
+      <View style={parlayGeneratorStyles.parlayFooter}>
+        <Text style={parlayGeneratorStyles.timestamp}>{parlay.timestamp}</Text>
+        <TouchableOpacity style={parlayGeneratorStyles.buildButton}>
+          <LinearGradient
+            colors={['#f59e0b', '#d97706']}
+            style={parlayGeneratorStyles.buildButtonGradient}
+          >
+            <Ionicons name="add-circle" size={14} color="white" />
+            <Text style={parlayGeneratorStyles.buildButtonText}>Build This Parlay</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  return (
+    <View style={parlayGeneratorStyles.container}>
+      <LinearGradient
+        colors={['#1e293b', '#0f172a']}
+        style={parlayGeneratorStyles.gradient}
+      >
+        <View style={parlayGeneratorStyles.header}>
+          <View style={parlayGeneratorStyles.headerLeft}>
+            <View style={parlayGeneratorStyles.iconContainer}>
+              <Ionicons name="git-merge" size={24} color="#f59e0b" />
+            </View>
+            <View>
+              <Text style={parlayGeneratorStyles.title}>3-Leg Parlay Architect</Text>
+              <Text style={parlayGeneratorStyles.subtitle}>Smart parlay builder with risk management</Text>
+            </View>
+          </View>
+          
+          <TouchableOpacity 
+            style={[
+              parlayGeneratorStyles.generateButton,
+              isGenerating && parlayGeneratorStyles.generateButtonDisabled
+            ]}
+            onPress={handleGenerate}
+            disabled={isGenerating}
+          >
+            <LinearGradient
+              colors={isGenerating ? ['#334155', '#475569'] : ['#f59e0b', '#d97706']}
+              style={parlayGeneratorStyles.generateButtonGradient}
+            >
+              {isGenerating ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <>
+                  <Ionicons name="build" size={16} color="white" />
+                  <Text style={parlayGeneratorStyles.generateButtonText}>
+                    Build Smart Parlays
+                  </Text>
+                </>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+        
+        {/* Filters */}
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          style={parlayGeneratorStyles.filtersScroll}
+        >
+          <TouchableOpacity
+            style={[
+              parlayGeneratorStyles.filterChip,
+              selectedFilters.type === 'mixed' && parlayGeneratorStyles.filterChipActive
+            ]}
+            onPress={() => setSelectedFilters(prev => ({...prev, type: 'mixed'}))}
+          >
+            <Ionicons 
+              name="shuffle" 
+              size={14} 
+              color={selectedFilters.type === 'mixed' ? '#f59e0b' : '#94a3b8'} 
+            />
+            <Text style={[
+              parlayGeneratorStyles.filterText,
+              selectedFilters.type === 'mixed' && parlayGeneratorStyles.filterTextActive
+            ]}>
+              Mixed Sports
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[
+              parlayGeneratorStyles.filterChip,
+              selectedFilters.type === 'same_game' && parlayGeneratorStyles.filterChipActive
+            ]}
+            onPress={() => setSelectedFilters(prev => ({...prev, type: 'same_game'}))}
+          >
+            <Ionicons 
+              name="game-controller" 
+              size={14} 
+              color={selectedFilters.type === 'same_game' ? '#f59e0b' : '#94a3b8'} 
+            />
+            <Text style={[
+              parlayGeneratorStyles.filterText,
+              selectedFilters.type === 'same_game' && parlayGeneratorStyles.filterTextActive
+            ]}>
+              Same Game
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[
+              parlayGeneratorStyles.filterChip,
+              selectedFilters.riskLevel === 'conservative' && parlayGeneratorStyles.filterChipActive
+            ]}
+            onPress={() => setSelectedFilters(prev => ({...prev, riskLevel: 'conservative'}))}
+          >
+            <Ionicons 
+              name="shield-checkmark" 
+              size={14} 
+              color={selectedFilters.riskLevel === 'conservative' ? '#10b981' : '#94a3b8'} 
+            />
+            <Text style={[
+              parlayGeneratorStyles.filterText,
+              selectedFilters.riskLevel === 'conservative' && parlayGeneratorStyles.filterTextActive
+            ]}>
+              Conservative
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[
+              parlayGeneratorStyles.filterChip,
+              selectedFilters.riskLevel === 'aggressive' && parlayGeneratorStyles.filterChipActive
+            ]}
+            onPress={() => setSelectedFilters(prev => ({...prev, riskLevel: 'aggressive'}))}
+          >
+            <Ionicons 
+              name="flame" 
+              size={14} 
+              color={selectedFilters.riskLevel === 'aggressive' ? '#ef4444' : '#94a3b8'} 
+            />
+            <Text style={[
+              parlayGeneratorStyles.filterText,
+              selectedFilters.riskLevel === 'aggressive' && parlayGeneratorStyles.filterTextActive
+            ]}>
+              Aggressive
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[
+              parlayGeneratorStyles.filterChip,
+              selectedFilters.timeframe === 'tonight' && parlayGeneratorStyles.filterChipActive
+            ]}
+            onPress={() => setSelectedFilters(prev => ({...prev, timeframe: 'tonight'}))}
+          >
+            <Ionicons 
+              name="moon" 
+              size={14} 
+              color={selectedFilters.timeframe === 'tonight' ? '#8b5cf6' : '#94a3b8'} 
+            />
+            <Text style={[
+              parlayGeneratorStyles.filterText,
+              selectedFilters.timeframe === 'tonight' && parlayGeneratorStyles.filterTextActive
+            ]}>
+              Tonight
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
+        
+        {generatedParlays.length > 0 ? (
+          <View style={parlayGeneratorStyles.parlaysContainer}>
+            {generatedParlays.map(renderParlayItem)}
+          </View>
+        ) : (
+          <View style={parlayGeneratorStyles.emptyContainer}>
+            <Ionicons name="git-merge-outline" size={40} color="#475569" />
+            <Text style={parlayGeneratorStyles.emptyText}>No parlays generated yet</Text>
+            <Text style={parlayGeneratorStyles.emptySubtext}>
+              Select filters and tap "Build Smart Parlays" to create {parlayLegs}-leg parlays
+            </Text>
+          </View>
+        )}
+        
+        <View style={parlayGeneratorStyles.footer}>
+          <Ionicons name="stats-chart" size={12} color="#059669" />
+          <Text style={parlayGeneratorStyles.footerText}>
+            • 3-leg parlays optimized for {selectedFilters.riskLevel} risk • Auto-balanced • Different from daily picks
+          </Text>
+        </View>
+      </LinearGradient>
+    </View>
+  );
+};
+
+const parlayGeneratorStyles = StyleSheet.create({
+  container: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    marginHorizontal: 20,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  gradient: {
+    padding: 20,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  iconContainer: {
+    backgroundColor: '#f59e0b20',
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  subtitle: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginTop: 2,
+  },
+  generateButton: {
+    borderRadius: 15,
+    overflow: 'hidden',
+    marginLeft: 15,
+  },
+  generateButtonDisabled: {
+    opacity: 0.7,
+  },
+  generateButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 15,
+  },
+  generateButtonText: {
+    color: 'white',
+    fontSize: 13,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  filtersScroll: {
+    marginBottom: 20,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#334155',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: '#475569',
+  },
+  filterChipActive: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+  filterText: {
+    fontSize: 12,
+    color: '#94a3b8',
+    fontWeight: '500',
+    marginLeft: 6,
+  },
+  filterTextActive: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  parlaysContainer: {
+    gap: 15,
+  },
+  parlayCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 15,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  parlayHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  typeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f59e0b20',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  typeText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#f59e0b',
+    marginLeft: 6,
+  },
+  riskBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  riskConservative: {
+    backgroundColor: '#10b98120',
+    borderWidth: 1,
+    borderColor: '#10b98140',
+  },
+  riskModerate: {
+    backgroundColor: '#f59e0b20',
+    borderWidth: 1,
+    borderColor: '#f59e0b40',
+  },
+  riskAggressive: {
+    backgroundColor: '#ef444420',
+    borderWidth: 1,
+    borderColor: '#ef444440',
+  },
+  riskText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#cbd5e1',
+  },
+  parlayTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 12,
+  },
+  legsContainer: {
+    gap: 8,
+    marginBottom: 12,
+  },
+  legItem: {
+    backgroundColor: 'rgba(30, 41, 59, 0.8)',
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  legHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  legSport: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  legSportText: {
+    fontSize: 11,
+    color: '#3b82f6',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  legType: {
+    fontSize: 10,
+    color: '#94a3b8',
+  },
+  legPick: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#cbd5e1',
+    marginBottom: 6,
+  },
+  legFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  legOdds: {
+    fontSize: 12,
+    color: '#10b981',
+    fontWeight: 'bold',
+  },
+  legConfidence: {
+    fontSize: 11,
+    color: '#f59e0b',
+    fontWeight: '600',
+  },
+  metricsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    backgroundColor: 'rgba(30, 41, 59, 0.8)',
+    borderRadius: 10,
+    padding: 12,
+  },
+  metricItem: {
+    width: '48%',
+    marginBottom: 8,
+  },
+  metricLabel: {
+    fontSize: 10,
+    color: '#94a3b8',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    fontWeight: '600',
+  },
+  metricValue: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  strategyInfo: {
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#8b5cf630',
+  },
+  strategyRow: {
+    flexDirection: 'row',
+    marginBottom: 6,
+  },
+  strategyLabel: {
+    fontSize: 11,
+    color: '#8b5cf6',
+    fontWeight: '600',
+    width: 80,
+  },
+  strategyValue: {
+    fontSize: 11,
+    color: '#cbd5e1',
+    flex: 1,
+  },
+  bankrollSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  bankrollText: {
+    fontSize: 11,
+    color: '#c4b5fd',
+    flex: 1,
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  parlayFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  timestamp: {
+    fontSize: 11,
+    color: '#64748b',
+  },
+  buildButton: {
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  buildButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  buildButtonText: {
+    fontSize: 11,
+    color: 'white',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    padding: 30,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#94a3b8',
+    fontWeight: '600',
+    marginTop: 15,
+  },
+  emptySubtext: {
+    fontSize: 13,
+    color: '#64748b',
+    marginTop: 5,
+    textAlign: 'center',
+  },
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 20,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+  },
+  footerText: {
+    fontSize: 11,
+    color: '#94a3b8',
+    marginLeft: 8,
+    flex: 1,
+  },
+});
 
 // Parlay-Specific Analytics Box
 const ParlayAnalyticsBox = () => {
@@ -308,217 +1265,6 @@ const parlayAnalyticsStyles = StyleSheet.create({
   },
 });
 
-// Parlay Builder Metrics Component
-const ParlayMetricsCard = ({ stats }) => {
-  return (
-    <View style={[parlayMetricsStyles.container, {backgroundColor: '#1e293b'}]}>
-      <LinearGradient
-        colors={['#1e293b', '#0f172a']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={parlayMetricsStyles.gradient}
-      >
-        <View style={parlayMetricsStyles.header}>
-          <Ionicons name="git-merge" size={24} color="#f59e0b" />
-          <Text style={parlayMetricsStyles.title}>Parlay Builder Insights</Text>
-        </View>
-        
-        {/* Optimal Legs Analysis */}
-        <View style={parlayMetricsStyles.legsAnalysis}>
-          <View style={parlayMetricsStyles.legsHeader}>
-            <Text style={parlayMetricsStyles.legsLabel}>Optimal Legs Analysis</Text>
-            <View style={parlayMetricsStyles.legsOptimal}>
-              <Ionicons name="checkmark-circle" size={16} color="#10b981" />
-              <Text style={parlayMetricsStyles.legsOptimalText}>2-3 Legs Recommended</Text>
-            </View>
-          </View>
-          
-          <View style={parlayMetricsStyles.legsChart}>
-            {[1, 2, 3, 4, 5].map((legs, index) => (
-              <View key={legs} style={parlayMetricsStyles.legBar}>
-                <View 
-                  style={[
-                    parlayMetricsStyles.legBarFill,
-                    { 
-                      height: `${stats.legsSuccess[legs - 1]}%`,
-                      backgroundColor: legs <= 3 ? '#f59e0b' : '#ef4444'
-                    }
-                  ]}
-                />
-                <Text style={parlayMetricsStyles.legLabel}>{legs}</Text>
-                <Text style={parlayMetricsStyles.legValue}>{stats.legsSuccess[legs - 1]}%</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-        
-        <View style={parlayMetricsStyles.multiSportSection}>
-          <View style={parlayMetricsStyles.multiSportHeader}>
-            <View style={parlayMetricsStyles.sportIcons}>
-              <Ionicons name="basketball" size={20} color="#ef4444" />
-              <Ionicons name="american-football" size={20} color="#3b82f6" style={{marginLeft: -8}} />
-              <Ionicons name="ice-cream" size={20} color="#1e40af" style={{marginLeft: -8}} />
-            </View>
-            <Text style={parlayMetricsStyles.multiSportTitle}>Multi-Sport Advantage</Text>
-          </View>
-          <Text style={parlayMetricsStyles.multiSportValue}>
-            +{stats.multiSportEdge}% better value
-          </Text>
-          <Text style={parlayMetricsStyles.multiSportText}>
-            Combining sports reduces correlation risk and improves value
-          </Text>
-        </View>
-        
-        <View style={parlayMetricsStyles.footer}>
-          <Ionicons name="information-circle" size={14} color="#64748b" />
-          <Text style={parlayMetricsStyles.footerText}>
-            Optimal parlays: 2-3 legs, mixed sports, high-probability picks
-          </Text>
-        </View>
-      </LinearGradient>
-    </View>
-  );
-};
-
-const parlayMetricsStyles = StyleSheet.create({
-  container: {
-    borderRadius: 20,
-    overflow: 'hidden',
-    marginBottom: 20,
-  },
-  gradient: {
-    padding: 20,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-    backgroundColor: 'transparent',
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: 'white',
-    marginLeft: 12,
-    backgroundColor: 'transparent',
-  },
-  legsAnalysis: {
-    marginBottom: 25,
-    backgroundColor: 'transparent',
-  },
-  legsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 15,
-    backgroundColor: 'transparent',
-  },
-  legsLabel: {
-    fontSize: 14,
-    color: '#cbd5e1',
-    fontWeight: '600',
-    backgroundColor: 'transparent',
-  },
-  legsOptimal: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#10b98130',
-  },
-  legsOptimalText: {
-    fontSize: 12,
-    color: '#10b981',
-    fontWeight: '600',
-    marginLeft: 4,
-    backgroundColor: 'transparent',
-  },
-  legsChart: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    height: 100,
-    paddingHorizontal: 10,
-    backgroundColor: 'transparent',
-  },
-  legBar: {
-    alignItems: 'center',
-    flex: 1,
-    backgroundColor: 'transparent',
-  },
-  legBarFill: {
-    width: 25,
-    borderRadius: 6,
-    marginBottom: 8,
-  },
-  legLabel: {
-    fontSize: 12,
-    color: '#94a3b8',
-    marginBottom: 4,
-    backgroundColor: 'transparent',
-  },
-  legValue: {
-    fontSize: 10,
-    color: '#cbd5e1',
-    fontWeight: '600',
-    backgroundColor: 'transparent',
-  },
-  multiSportSection: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 12,
-    padding: 15,
-    marginBottom: 15,
-  },
-  multiSportHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-    backgroundColor: 'transparent',
-  },
-  sportIcons: {
-    flexDirection: 'row',
-    marginRight: 12,
-    backgroundColor: 'transparent',
-  },
-  multiSportTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'white',
-    backgroundColor: 'transparent',
-  },
-  multiSportValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#f59e0b',
-    marginBottom: 5,
-    backgroundColor: 'transparent',
-  },
-  multiSportText: {
-    fontSize: 12,
-    color: '#94a3b8',
-    lineHeight: 16,
-    backgroundColor: 'transparent',
-  },
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 15,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-    backgroundColor: 'transparent',
-  },
-  footerText: {
-    fontSize: 12,
-    color: '#94a3b8',
-    marginLeft: 8,
-    backgroundColor: 'transparent',
-  },
-});
-
 // Gradient Wrapper Component
 const GradientWrapper = ({ colors, style, children, gradientStyle }) => {
   const firstColor = colors?.[0] || '#f59e0b';
@@ -535,10 +1281,17 @@ const GradientWrapper = ({ colors, style, children, gradientStyle }) => {
 };
 
 // Main Component
-export default function ParlayBuilderScreen() {
+export default function ParlayBuilderScreen({ route }) {
   const { logEvent, logNavigation, logSecretPhrase } = useAnalytics();
   const navigation = useAppNavigation();
-  const { searchHistory, addToSearchHistory } = useSearch();
+  
+  // Fix 1: Add Search History Hook
+  const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();
+  
+  // Fix 2: Add Search Implementation
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  
   const [selectedPicks, setSelectedPicks] = useState([]);
   const [availablePlayers, setAvailablePlayers] = useState([]);
   const [filteredPlayers, setFilteredPlayers] = useState([]);
@@ -547,13 +1300,32 @@ export default function ParlayBuilderScreen() {
   const [parlayConfidence, setParlayConfidence] = useState(0);
   const [parlayOdds, setParlayOdds] = useState('+100');
   const [expectedPayout, setExpectedPayout] = useState(0);
-  const [searchQuery, setSearchQuery] = useState('');
   const [searchModalVisible, setSearchModalVisible] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [showGeneratingModal, setShowGeneratingModal] = useState(false);
   const [selectedSport, setSelectedSport] = useState('All');
   const [parlayLegs, setParlayLegs] = useState(3);
   const [autoBalanceEnabled, setAutoBalanceEnabled] = useState(true);
+  
+  // Fix 4: Add data structure states
+  const [selectedTeam, setSelectedTeam] = useState('all');
+  const [filter, setFilter] = useState('all');
+  
+  // Fix 5: Add backend API states
+  const [useBackend, setUseBackend] = useState(true);
+  const [backendError, setBackendError] = useState(null);
+  const [realPlayers, setRealPlayers] = useState([]);
+
+  // Fix 3: Handle navigation params
+  useEffect(() => {
+    if (route.params?.initialSearch) {
+      setSearchInput(route.params.initialSearch);
+      setSearchQuery(route.params.initialSearch);
+    }
+    if (route.params?.initialSport) {
+      setSelectedSport(route.params.initialSport);
+    }
+  }, [route.params]);
 
   // Parlay-specific prompts
   const parlayPrompts = [
@@ -577,6 +1349,104 @@ export default function ParlayBuilderScreen() {
     { id: 'NHL', name: 'NHL', icon: 'ice-cream', gradient: ['#1e40af', '#1e3a8a'] },
     { id: 'MLB', name: 'MLB', icon: 'baseball', gradient: ['#10b981', '#059669'] },
   ];
+
+  // Fix 4: Create filterSamplePlayers function
+  const filterSamplePlayers = useCallback((searchQuery = '', positionFilter = 'all', teamFilter = 'all', sportFilter = 'All') => {
+    const allPlayers = [];
+    
+    // Get players from all sports or specific sport
+    if (sportFilter === 'All') {
+      ['NBA', 'NFL', 'NHL', 'MLB'].forEach(sport => {
+        const sportPlayers = samplePlayers[sport] || [];
+        allPlayers.push(...sportPlayers.map(p => ({...p, sport})));
+      });
+    } else {
+      const sportPlayers = samplePlayers[sportFilter] || [];
+      allPlayers.push(...sportPlayers.map(p => ({...p, sport: sportFilter})));
+    }
+    
+    let filteredPlayers = allPlayers;
+    
+    // Apply position filter
+    if (positionFilter !== 'all') {
+      filteredPlayers = allPlayers.filter(player => {
+        if (player.sport === 'NFL' || player.sport === 'MLB') {
+          return player.position === positionFilter;
+        } else {
+          return player.position.includes(positionFilter) || player.position.split('/').includes(positionFilter);
+        }
+      });
+    }
+    
+    // Apply team filter
+    if (teamFilter !== 'all') {
+      const team = teams[selectedSport]?.find(t => t.id === teamFilter);
+      if (team) {
+        filteredPlayers = filteredPlayers.filter(player => 
+          player.team === team.name
+        );
+      }
+    }
+    
+    // Apply search filter with enhanced logic
+    if (searchQuery) {
+      const searchLower = searchQuery.toLowerCase().trim();
+      const searchKeywords = searchLower.split(/\s+/).filter(keyword => keyword.length > 0);
+      
+      // First, try exact search for team names
+      let teamSearchResults = [];
+      if (searchKeywords.length >= 2) {
+        const possibleTeamName = searchKeywords.join(' ');
+        teamSearchResults = filteredPlayers.filter(player => 
+          player.team.toLowerCase().includes(possibleTeamName)
+        );
+      }
+      
+      if (teamSearchResults.length > 0) {
+        filteredPlayers = teamSearchResults;
+      } else {
+        // Otherwise, search by keywords
+        filteredPlayers = filteredPlayers.filter(player => {
+          const playerName = player.name.toLowerCase();
+          const playerTeam = player.team.toLowerCase();
+          const playerPosition = player.position ? player.position.toLowerCase() : '';
+          const playerSport = player.sport ? player.sport.toLowerCase() : '';
+          
+          for (const keyword of searchKeywords) {
+            const commonWords = ['player', 'players', 'stats', 'stat', 'statistics', 'points', 'yards', 'touchdowns', 'assists', 'rebounds'];
+            if (commonWords.includes(keyword)) {
+              continue;
+            }
+            
+            if (
+              playerName.includes(keyword) ||
+              playerTeam.includes(keyword) ||
+              playerPosition.includes(keyword) ||
+              playerSport.includes(keyword) ||
+              playerTeam.split(' ').some(word => word.includes(keyword)) ||
+              playerName.split(' ').some(word => word.includes(keyword))
+            ) {
+              return true;
+            }
+          }
+          
+          return searchKeywords.length === 0;
+        });
+      }
+    }
+    
+    console.log(`Sample data filtered: ${filteredPlayers.length} players`);
+    return filteredPlayers;
+  }, []);
+
+  // Fix 2: Update handleSearchSubmit with search history
+  const handleSearchSubmit = async () => {
+    if (searchInput.trim()) {
+      await addToSearchHistory(searchInput.trim());
+      setSearchQuery(searchInput.trim());
+      handleSearch(searchInput.trim());
+    }
+  };
 
   // Calculate parlay odds and payout
   const calculateParlay = useCallback((picks) => {
@@ -616,86 +1486,149 @@ export default function ParlayBuilderScreen() {
     });
   }, [logEvent]);
 
-  // Generate parlay picks
-  const generateParlayPicks = async (prompt) => {
-    if (selectedPicks.length >= 3) {
-      Alert.alert('Parlay Limit', 'Maximum 3 legs per parlay. Remove some picks or create a new parlay.');
+  // Fix 2: Update search function with enhanced logic
+  const handleSearch = useCallback((query) => {
+    setSearchQuery(query);
+    
+    if (!query.trim()) {
+      setFilteredPlayers(availablePlayers);
       return;
     }
+    
+    const lowerQuery = query.toLowerCase().trim();
+    console.log(`Searching for: "${lowerQuery}" in available picks`);
+    
+    // Split search into keywords
+    const searchKeywords = lowerQuery.split(/\s+/).filter(keyword => keyword.length > 0);
+    
+    const filtered = availablePlayers.filter(player => {
+      const playerName = player.name.toLowerCase();
+      const playerTeam = player.team.toLowerCase();
+      const playerSport = player.sport.toLowerCase();
+      const playerCategory = player.category ? player.category.toLowerCase() : '';
+      
+      // Try exact team name matching first
+      if (searchKeywords.length >= 2) {
+        const possibleTeamName = searchKeywords.join(' ');
+        if (playerTeam.includes(possibleTeamName)) {
+          return true;
+        }
+      }
+      
+      // Check each keyword
+      for (const keyword of searchKeywords) {
+        const commonWords = ['player', 'players', 'stats', 'stat', 'statistics', 'points', 'yards', 'touchdowns', 'assists', 'rebounds'];
+        if (commonWords.includes(keyword)) {
+          continue;
+        }
+        
+        if (
+          playerName.includes(keyword) ||
+          playerTeam.includes(keyword) ||
+          playerSport.includes(keyword) ||
+          playerCategory.includes(keyword) ||
+          playerTeam.split(' ').some(word => word.includes(keyword)) ||
+          playerName.split(' ').some(word => word.includes(keyword))
+        ) {
+          return true;
+        }
+      }
+      
+      return false;
+    });
+    
+    setFilteredPlayers(filtered);
+    logAnalyticsEvent('parlay_search', { query, results: filtered.length });
+  }, [availablePlayers]);
 
+  // Load mock data
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Mock players data
+      const mockPlayers = [
+        { id: '1', name: 'Stephen Curry', team: 'GSW', sport: 'NBA', position: 'Points', line: 'Over 31.5', confidence: 88, edge: '+4.7%', category: 'High Probability' },
+        { id: '2', name: 'Patrick Mahomes', team: 'KC', sport: 'NFL', position: 'Passing Yards', line: 'Over 285.5', confidence: 82, edge: '+5.2%', category: 'Value Bet' },
+        { id: '3', name: 'Connor McDavid', team: 'EDM', sport: 'NHL', position: 'Points', line: 'Over 1.5', confidence: 79, edge: '+6.8%', category: 'Contrarian Play' },
+        { id: '4', name: 'Shohei Ohtani', team: 'LAA', sport: 'MLB', position: 'Total Bases', line: 'Over 1.5', confidence: 75, edge: '+7.1%', category: 'High Probability' },
+        { id: '5', name: 'Nikola Jokic', team: 'DEN', sport: 'NBA', position: 'Assists', line: 'Over 9.5', confidence: 85, edge: '+3.9%', category: 'High Probability' },
+        { id: '6', name: 'Josh Allen', team: 'BUF', sport: 'NFL', position: 'Passing TDs', line: 'Over 1.5', confidence: 68, edge: '+9.5%', category: 'Value Bet' },
+      ];
+
+      setAvailablePlayers(mockPlayers);
+      setFilteredPlayers(mockPlayers);
+      setLoading(false);
+    } catch (error) {
+      console.error('Error loading data:', error);
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    logScreenView('ParlayBuilderScreen');
+    logAnalyticsEvent('parlay_builder_screen_view');
+    loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    calculateParlay(selectedPicks);
+  }, [selectedPicks, calculateParlay]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
+    logEvent('parlay_builder_refresh');
+  }, [loadData, logEvent]);
+
+  // Fix 2: Handle 3-leg parlay generation
+  const handleGenerateThreeLegParlay = (parlays) => {
     setGenerating(true);
     setShowGeneratingModal(true);
-
-    try {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Generate parlay-specific picks
-      const newPicks = generateParlaySpecificPicks(prompt);
-      const availableSlots = 3 - selectedPicks.length;
-      const picksToAdd = newPicks.slice(0, availableSlots);
-
+    
+    // Use the first parlay from the generated list
+    if (parlays && parlays.length > 0) {
+      const parlay = parlays[0];
+      
+      // Convert parlay legs to picks format
+      const newPicks = parlay.legs.map((leg, index) => ({
+        id: `parlay-leg-${Date.now()}-${index}`,
+        type: 'parlay_leg',
+        name: `Leg ${index + 1}`,
+        sport: leg.sport,
+        category: 'Smart Parlay',
+        pick: leg.pick,
+        confidence: leg.confidence,
+        odds: leg.odds,
+        edge: leg.edge,
+        analysis: leg.analysis,
+        timestamp: 'Just generated',
+        probability: `${leg.confidence}%`,
+        units: '2.0'
+      }));
+      
+      // Clear existing picks and add new ones (max 3)
+      const picksToAdd = newPicks.slice(0, Math.min(3 - selectedPicks.length, newPicks.length));
       const updatedPicks = [...selectedPicks, ...picksToAdd];
-      setSelectedPicks(updatedPicks);
-      calculateParlay(updatedPicks);
-
-      logEvent('parlay_picks_generated', {
-        prompt,
-        picks_added: picksToAdd.length,
-        total_picks: updatedPicks.length
-      });
-
+      
+      if (picksToAdd.length > 0) {
+        setSelectedPicks(updatedPicks);
+        calculateParlay(updatedPicks);
+      }
+      
       setTimeout(() => {
         setShowGeneratingModal(false);
         setGenerating(false);
+        
+        Alert.alert(
+          'Parlay Built!',
+          `${picksToAdd.length}-leg smart parlay added with ${parlay.winProbability} win probability`,
+          [{ text: 'OK', style: 'default' }]
+        );
       }, 1500);
-
-    } catch (error) {
-      console.error('Error generating parlay picks:', error);
-      setShowGeneratingModal(false);
-      setGenerating(false);
-      Alert.alert('Error', 'Failed to generate parlay picks');
     }
-  };
-
-  // Generate parlay-specific picks
-  const generateParlaySpecificPicks = (prompt) => {
-    const picks = [];
-    const sportsList = ['NBA', 'NFL', 'NHL', 'MLB'];
-    const categories = ['High Probability', 'Value Bet', 'Contrarian Play'];
-
-    for (let i = 0; i < 3; i++) {
-      const sport = sportsList[Math.floor(Math.random() * sportsList.length)];
-      const category = categories[Math.floor(Math.random() * categories.length)];
-      
-      picks.push({
-        id: `parlay-${Date.now()}-${i}`,
-        type: 'parlay_leg',
-        name: `Parlay Leg ${i + 1}`,
-        sport: sport,
-        category: category,
-        pick: getRandomPickForSport(sport),
-        confidence: 70 + Math.floor(Math.random() * 25),
-        odds: ['-150', '-110', '+120', '+180'][Math.floor(Math.random() * 4)],
-        edge: `+${(5 + Math.random() * 15).toFixed(1)}%`,
-        analysis: `Strong parlay candidate: ${category.toLowerCase()} with good value`,
-        timestamp: 'Just now',
-        probability: `${70 + Math.floor(Math.random() * 25)}%`,
-        units: (1 + Math.random() * 2).toFixed(1),
-        generatedFrom: prompt
-      });
-    }
-
-    return picks;
-  };
-
-  const getRandomPickForSport = (sport) => {
-    const picks = {
-      NBA: ['Over 28.5 Points', 'Over 7.5 Rebounds', 'Over 8.5 Assists', 'Moneyline Winner', 'Team Total Over'],
-      NFL: ['Over 250.5 Passing Yards', 'Over 1.5 Touchdowns', 'Moneyline Winner', 'Team Total Over', 'Anytime TD'],
-      NHL: ['Over 3.5 Shots on Goal', 'Anytime Goal Scorer', 'Moneyline Winner', 'Total Goals Over', 'Power Play Goal'],
-      MLB: ['Over 1.5 Hits', 'Over 0.5 RBIs', 'Moneyline Winner', 'Total Runs Over', 'Team Total Over']
-    };
-    return picks[sport]?.[Math.floor(Math.random() * picks[sport].length)] || 'Player Prop';
   };
 
   // Add pick to parlay
@@ -803,48 +1736,6 @@ export default function ParlayBuilderScreen() {
       sports_diversity: new Set(optimizedPicks.map(p => p.sport)).size
     });
   };
-
-  // Load mock data
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Mock players data
-      const mockPlayers = [
-        { id: '1', name: 'Stephen Curry', team: 'GSW', sport: 'NBA', position: 'Points', line: 'Over 31.5', confidence: 88, edge: '+4.7%', category: 'High Probability' },
-        { id: '2', name: 'Patrick Mahomes', team: 'KC', sport: 'NFL', position: 'Passing Yards', line: 'Over 285.5', confidence: 82, edge: '+5.2%', category: 'Value Bet' },
-        { id: '3', name: 'Connor McDavid', team: 'EDM', sport: 'NHL', position: 'Points', line: 'Over 1.5', confidence: 79, edge: '+6.8%', category: 'Contrarian Play' },
-        { id: '4', name: 'Shohei Ohtani', team: 'LAA', sport: 'MLB', position: 'Total Bases', line: 'Over 1.5', confidence: 75, edge: '+7.1%', category: 'High Probability' },
-        { id: '5', name: 'Nikola Jokic', team: 'DEN', sport: 'NBA', position: 'Assists', line: 'Over 9.5', confidence: 85, edge: '+3.9%', category: 'High Probability' },
-        { id: '6', name: 'Josh Allen', team: 'BUF', sport: 'NFL', position: 'Passing TDs', line: 'Over 1.5', confidence: 68, edge: '+9.5%', category: 'Value Bet' },
-      ];
-
-      setAvailablePlayers(mockPlayers);
-      setFilteredPlayers(mockPlayers);
-      setLoading(false);
-    } catch (error) {
-      console.error('Error loading data:', error);
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    logScreenView('ParlayBuilderScreen');
-    logAnalyticsEvent('parlay_builder_screen_view');
-    loadData();
-  }, [loadData]);
-
-  useEffect(() => {
-    calculateParlay(selectedPicks);
-  }, [selectedPicks, calculateParlay]);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
-    logEvent('parlay_builder_refresh');
-  }, [loadData, logEvent]);
 
   // Render parlay leg item
   const renderParlayLeg = ({ item, index }) => {
@@ -979,17 +1870,17 @@ export default function ParlayBuilderScreen() {
           {generating ? (
             <>
               <ActivityIndicator size="large" color="#f59e0b" />
-              <Text style={styles.generatingTitle}>Building Your Parlay...</Text>
+              <Text style={styles.generatingTitle}>Building Smart Parlay...</Text>
               <Text style={styles.generatingText}>
-                Finding optimal 2-3 leg combination with high probability
+                Analyzing {parlayLegs}-leg combinations with optimal risk/reward
               </Text>
             </>
           ) : (
             <>
               <Ionicons name="checkmark-circle" size={60} color="#10b981" />
-              <Text style={styles.generatingTitle}>Parlay Built!</Text>
+              <Text style={styles.generatingTitle}>Smart Parlay Built!</Text>
               <Text style={styles.generatingText}>
-                {selectedPicks.length}-leg parlay ready for analysis
+                {selectedPicks.length}-leg parlay optimized for maximum value
               </Text>
               <TouchableOpacity
                 style={styles.generatingButton}
@@ -1034,12 +1925,20 @@ export default function ParlayBuilderScreen() {
                 <Ionicons name="arrow-back" size={24} color="white" />
               </TouchableOpacity>
               
-              <TouchableOpacity 
-                style={styles.headerSearchButton}
-                onPress={() => setSearchModalVisible(true)}
-              >
-                <Ionicons name="search-outline" size={20} color="white" />
-              </TouchableOpacity>
+              {/* Fix 2: Updated Search Implementation */}
+              <View style={styles.headerSearchContainer}>
+                <TextInput
+                  value={searchInput}
+                  onChangeText={setSearchInput}
+                  onSubmitEditing={handleSearchSubmit}
+                  placeholder="Search players or picks..."
+                  placeholderTextColor="rgba(255,255,255,0.7)"
+                  style={styles.headerSearchInput}
+                />
+                <TouchableOpacity onPress={handleSearchSubmit} style={styles.headerSearchButton}>
+                  <Ionicons name="search" size={16} color="white" />
+                </TouchableOpacity>
+              </View>
             </View>
             
             <View style={styles.headerMain}>
@@ -1047,54 +1946,30 @@ export default function ParlayBuilderScreen() {
                 <Ionicons name="git-merge" size={32} color="white" />
               </View>
               <View style={styles.headerText}>
-                <Text style={styles.headerTitle}>Parlay Builder</Text>
-                <Text style={styles.headerSubtitle}>Build high-probability parlays (max 3 legs)</Text>
+                <Text style={styles.headerTitle}>3-Leg Parlay Architect</Text>
+                <Text style={styles.headerSubtitle}>Build smart multi-sport parlays with risk management</Text>
               </View>
             </View>
           </LinearGradient>
         </View>
 
-        {/* Legs Selector */}
-        <View style={styles.legsSelector}>
-          <Text style={styles.legsLabel}>Parlay Legs:</Text>
-          {[2, 3, 4, 5].map(legs => (
-            <TouchableOpacity
-              key={legs}
-              style={[
-                styles.legButton,
-                parlayLegs === legs && styles.legButtonActive
-              ]}
-              onPress={() => setParlayLegs(legs)}
-            >
-              {parlayLegs === legs ? (
-                <GradientWrapper
-                  colors={['#f59e0b', '#d97706']}
-                  style={styles.legButtonGradient}
-                  gradientStyle={{flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: 8}}
-                >
-                  <Text style={styles.legButtonTextActive}>{legs}</Text>
-                </GradientWrapper>
-              ) : (
-                <Text style={styles.legButtonText}>{legs}</Text>
-              )}
-            </TouchableOpacity>
-          ))}
-          <View style={styles.autoBalanceToggle}>
-            <Text style={styles.autoBalanceText}>Auto-Balance</Text>
-            <TouchableOpacity
-              style={[
-                styles.toggleButton,
-                autoBalanceEnabled && styles.toggleButtonActive
-              ]}
-              onPress={() => setAutoBalanceEnabled(!autoBalanceEnabled)}
-            >
-              <View style={[
-                styles.toggleCircle,
-                autoBalanceEnabled && styles.toggleCircleActive
-              ]} />
-            </TouchableOpacity>
+        {/* Fix 4: Debug display */}
+        {searchQuery && (
+          <View style={{paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#1e293b'}}>
+            <Text style={{color: 'white', fontSize: 12}}>
+              DEBUG: Search = "{searchQuery}", Sport = "{selectedSport}", Legs = {parlayLegs}
+            </Text>
           </View>
-        </View>
+        )}
+
+        {/* Fix 5: Error display */}
+        {backendError && (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>
+              Backend Error: {backendError}. Using sample data.
+            </Text>
+          </View>
+        )}
 
         <ScrollView
           refreshControl={
@@ -1106,12 +1981,13 @@ export default function ParlayBuilderScreen() {
             />
           }
         >
-          {/* Parlay Metrics Card */}
-          <ParlayMetricsCard 
-            stats={{
-              legsSuccess: [72, 68, 65, 58, 42],
-              multiSportEdge: '18.5'
-            }} 
+          {/* ENHANCED: New 3-Leg Parlay Generator Component */}
+          <ThreeLegParlayGenerator 
+            onGenerate={handleGenerateThreeLegParlay}
+            isGenerating={generating}
+            selectedSport={selectedSport}
+            parlayLegs={parlayLegs}
+            autoBalanceEnabled={autoBalanceEnabled}
           />
 
           {/* Current Parlay Section */}
@@ -1136,7 +2012,7 @@ export default function ParlayBuilderScreen() {
               <View style={styles.emptyParlay}>
                 <Ionicons name="git-merge" size={48} color="#d1d5db" />
                 <Text style={styles.emptyText}>No picks in your parlay</Text>
-                <Text style={styles.emptySubtext}>Add picks below or generate a parlay</Text>
+                <Text style={styles.emptySubtext}>Add picks below or generate a smart parlay above</Text>
               </View>
             ) : (
               <>
@@ -1204,42 +2080,46 @@ export default function ParlayBuilderScreen() {
             )}
           </View>
 
-          {/* Generate Parlay Section */}
-          <View style={styles.generateSection}>
-            <View style={styles.generateHeader}>
-              <GradientWrapper
-                colors={['#f59e0b', '#d97706']}
-                style={styles.generateTitleGradient}
-                gradientStyle={{paddingHorizontal: 20, paddingVertical: 12, borderRadius: 15, alignItems: 'center'}}
+          {/* Legs Selector */}
+          <View style={styles.legsSelector}>
+            <Text style={styles.legsLabel}>Parlay Legs:</Text>
+            {[2, 3, 4, 5].map(legs => (
+              <TouchableOpacity
+                key={legs}
+                style={[
+                  styles.legButton,
+                  parlayLegs === legs && styles.legButtonActive
+                ]}
+                onPress={() => setParlayLegs(legs)}
               >
-                <Text style={styles.generateTitle}>⚡ Generate Smart Parlays</Text>
-              </GradientWrapper>
-              <Text style={styles.generateSubtitle}>AI builds optimal 2-3 leg parlays</Text>
-            </View>
-
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              style={styles.promptsScroll}
-            >
-              {parlayPrompts.map((prompt, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={styles.promptChip}
-                  onPress={() => generateParlayPicks(prompt)}
-                  disabled={generating || selectedPicks.length >= 3}
-                >
+                {parlayLegs === legs ? (
                   <GradientWrapper
                     colors={['#f59e0b', '#d97706']}
-                    style={[styles.promptChipGradient, (generating || selectedPicks.length >= 3) && styles.promptChipDisabled]}
-                    gradientStyle={{flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 20}}
+                    style={styles.legButtonGradient}
+                    gradientStyle={{flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: 8}}
                   >
-                    <Ionicons name="flash" size={14} color="#fff" />
-                    <Text style={styles.promptChipText}>{prompt}</Text>
+                    <Text style={styles.legButtonTextActive}>{legs}</Text>
                   </GradientWrapper>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+                ) : (
+                  <Text style={styles.legButtonText}>{legs}</Text>
+                )}
+              </TouchableOpacity>
+            ))}
+            <View style={styles.autoBalanceToggle}>
+              <Text style={styles.autoBalanceText}>Auto-Balance</Text>
+              <TouchableOpacity
+                style={[
+                  styles.toggleButton,
+                  autoBalanceEnabled && styles.toggleButtonActive
+                ]}
+                onPress={() => setAutoBalanceEnabled(!autoBalanceEnabled)}
+              >
+                <View style={[
+                  styles.toggleCircle,
+                  autoBalanceEnabled && styles.toggleCircleActive
+                ]} />
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Sport Selector */}
@@ -1294,6 +2174,12 @@ export default function ParlayBuilderScreen() {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.picksList}
               />
+            ) : searchQuery ? (
+              <View style={styles.emptyPicks}>
+                <Ionicons name="search-outline" size={40} color="#d1d5db" />
+                <Text style={styles.emptyText}>No picks found for "{searchQuery}"</Text>
+                <Text style={styles.emptySubtext}>Try a different search term or select "All Sports"</Text>
+              </View>
             ) : (
               <View style={styles.emptyPicks}>
                 <Ionicons name="search-outline" size={40} color="#d1d5db" />
@@ -1305,86 +2191,29 @@ export default function ParlayBuilderScreen() {
 
           {/* Parlay Tips */}
           <View style={styles.tipsSection}>
-            <Text style={styles.tipsTitle}>💡 Parlay Building Tips</Text>
+            <Text style={styles.tipsTitle}>💡 Smart Parlay Building Tips</Text>
             <View style={styles.tipItem}>
               <Ionicons name="checkmark-circle" size={16} color="#10b981" />
-              <Text style={styles.tipText}>Limit parlays to 2-3 legs for best success rate</Text>
+              <Text style={styles.tipText}>3-leg parlays offer the best balance of risk and reward</Text>
             </View>
             <View style={styles.tipItem}>
               <Ionicons name="checkmark-circle" size={16} color="#10b981" />
-              <Text style={styles.tipText}>Combine different sports to reduce correlation risk</Text>
+              <Text style={styles.tipText}>Combine different sports to eliminate correlation risk</Text>
             </View>
             <View style={styles.tipItem}>
               <Ionicons name="checkmark-circle" size={16} color="#10b981" />
-              <Text style={styles.tipText}>Mix high-probability picks with value bets</Text>
+              <Text style={styles.tipText}>Mix high-probability picks (70%+) with value bets for optimal EV</Text>
             </View>
             <View style={styles.tipItem}>
               <Ionicons name="checkmark-circle" size={16} color="#10b981" />
-              <Text style={styles.tipText}>Target parlays with +200 to +500 odds for optimal value</Text>
+              <Text style={styles.tipText}>Target parlays with +200 to +500 odds for bankroll growth</Text>
+            </View>
+            <View style={styles.tipItem}>
+              <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+              <Text style={styles.tipText}>Use the Smart Parlay Generator for data-driven combinations</Text>
             </View>
           </View>
         </ScrollView>
-
-        {/* Search Modal */}
-        <Modal
-          animationType="slide"
-          transparent={false}
-          visible={searchModalVisible}
-          onRequestClose={() => setSearchModalVisible(false)}
-        >
-          <View style={styles.searchModal}>
-            <View style={styles.searchHeader}>
-              <TouchableOpacity 
-                onPress={() => setSearchModalVisible(false)}
-                style={styles.modalBackButton}
-              >
-                <Ionicons name="arrow-back" size={24} color="#333" />
-              </TouchableOpacity>
-              <Text style={styles.modalTitle}>Search Picks</Text>
-            </View>
-
-            <SearchBar
-              placeholder="Search players or picks..."
-              onSearch={(query) => {
-                setSearchQuery(query);
-                const filtered = availablePlayers.filter(p => 
-                  p.name.toLowerCase().includes(query.toLowerCase()) ||
-                  p.team.toLowerCase().includes(query.toLowerCase()) ||
-                  p.sport.toLowerCase().includes(query.toLowerCase())
-                );
-                setFilteredPlayers(filtered);
-              }}
-              searchHistory={searchHistory}
-              style={styles.modalSearchBar}
-            />
-            
-            <FlatList
-              data={filteredPlayers}
-              keyExtractor={item => item.id}
-              renderItem={({ item }) => (
-                <TouchableOpacity 
-                  style={styles.searchResult}
-                  onPress={() => {
-                    addToParlay(item);
-                    setSearchModalVisible(false);
-                  }}
-                >
-                  <View style={styles.searchResultContent}>
-                    <Text style={styles.searchResultName}>{item.name}</Text>
-                    <Text style={styles.searchResultInfo}>
-                      {item.team} • {item.sport} • {item.category}
-                    </Text>
-                    <View style={styles.searchResultStats}>
-                      <Text style={styles.searchResultStat}>{item.confidence}% confidence</Text>
-                      <Text style={styles.searchResultStat}>{item.edge} edge</Text>
-                    </View>
-                  </View>
-                  <Ionicons name="add-circle" size={24} color="#f59e0b" />
-                </TouchableOpacity>
-              )}
-            />
-          </View>
-        </Modal>
 
         {renderGeneratingModal()}
         <ParlayAnalyticsBox />
@@ -1411,14 +2240,19 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#ffffff',
-    padding: 20,
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    margin: 16,
+  },
+  errorText: {
+    color: '#dc2626',
+    fontSize: 12,
   },
   
-  // Header
+  // Header with search
   header: {
     paddingHorizontal: 16,
     paddingTop: Platform.OS === 'ios' ? 60 : 40,
@@ -1439,14 +2273,23 @@ const styles = StyleSheet.create({
   backButton: {
     padding: 8,
   },
-  headerSearchButton: {
-    padding: 8,
+  headerSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: 'rgba(30, 41, 59, 0.9)',
     borderRadius: 20,
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
+    flex: 1,
+    marginLeft: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  headerSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: 'white',
+  },
+  headerSearchButton: {
+    padding: 4,
   },
   headerMain: {
     flexDirection: 'row',
@@ -1463,7 +2306,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: 'bold',
     color: 'white',
     textShadowColor: 'rgba(0,0,0,0.3)',
@@ -1471,7 +2314,7 @@ const styles = StyleSheet.create({
     textShadowRadius: 3,
   },
   headerSubtitle: {
-    fontSize: 16,
+    fontSize: 14,
     color: 'white',
     opacity: 0.9,
     marginTop: 5,
@@ -1791,62 +2634,6 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
 
-  // Generate Section
-  generateSection: {
-    backgroundColor: '#1e293b',
-    marginHorizontal: 16,
-    marginBottom: 20,
-    borderRadius: 20,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  generateHeader: {
-    marginBottom: 20,
-  },
-  generateTitleGradient: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 15,
-    marginBottom: 10,
-  },
-  generateTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: 'white',
-    textAlign: 'center',
-  },
-  generateSubtitle: {
-    fontSize: 14,
-    color: '#cbd5e1',
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  promptsScroll: {
-    marginVertical: 15,
-  },
-  promptChip: {
-    marginRight: 15,
-    borderRadius: 20,
-  },
-  promptChipGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 20,
-  },
-  promptChipDisabled: {
-    opacity: 0.6,
-  },
-  promptChipText: {
-    fontSize: 13,
-    color: 'white',
-    fontWeight: '600',
-    marginLeft: 8,
-    flex: 1,
-  },
-
   // Sport Selector
   sportSelector: {
     flexDirection: 'row',
@@ -2060,63 +2847,5 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: '600',
     fontSize: 14,
-  },
-
-  // Search Modal
-  searchModal: {
-    flex: 1,
-    backgroundColor: 'white',
-  },
-  searchHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: 60,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  modalBackButton: {
-    marginRight: 16,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1f2937',
-  },
-  modalSearchBar: {
-    marginHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 16,
-  },
-  searchResult: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
-  },
-  searchResultContent: {
-    flex: 1,
-  },
-  searchResultName: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#1f2937',
-    marginBottom: 2,
-  },
-  searchResultInfo: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginBottom: 4,
-  },
-  searchResultStats: {
-    flexDirection: 'row',
-  },
-  searchResultStat: {
-    fontSize: 12,
-    color: '#10b981',
-    marginRight: 12,
   },
 });

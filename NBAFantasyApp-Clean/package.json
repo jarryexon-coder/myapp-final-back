@@ -6,7 +6,11 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "test:backend": "node scripts/test-backend-connection.js",
+    "test:backend:ci": "node scripts/test-backend-connection.js --url=https://your-production-backend.com",
+    "test:backend:full": "node scripts/test-backend-connection.js --suites=basic,core,data,services",
+    "verify:connection": "react-native run-ios --simulator='iPhone 14' --scheme='BackendTest'"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

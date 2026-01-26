@@ -18,14 +18,13 @@ const SearchBar = ({
   placeholder = 'Search...',
   onSearch,
   onClear,
-  searchHistory = [],
   showHistory = true,
   autoFocus = false,
   style,
   inputStyle,
   containerStyle,
 }) => {
-  const { addToSearchHistory, removeFromSearchHistory } = useSearch();
+  const { addToSearchHistory, searchHistory } = useSearch();
   const [query, setQuery] = useState('');
   const [showHistoryList, setShowHistoryList] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
@@ -48,8 +47,10 @@ const SearchBar = ({
     }
   }, [showHistoryList]);
 
+  // Updated handleSearch function - only triggers search, not navigation
   const handleSearch = (text) => {
     setQuery(text);
+    // Only trigger search if onSearch prop is provided
     if (onSearch) {
       onSearch(text);
     }
@@ -64,6 +65,7 @@ const SearchBar = ({
   const handleSubmit = () => {
     if (query.trim()) {
       addToSearchHistory(query);
+      // Only trigger search if onSearch prop is provided
       if (onSearch) {
         onSearch(query);
       }
@@ -82,16 +84,12 @@ const SearchBar = ({
 
   const handleHistoryItemPress = (item) => {
     setQuery(item);
+    // Only trigger search if onSearch prop is provided
     if (onSearch) {
       onSearch(item);
     }
     setShowHistoryList(false);
     Keyboard.dismiss();
-  };
-
-  const handleRemoveHistoryItem = (index, e) => {
-    e.stopPropagation();
-    removeFromSearchHistory(index);
   };
 
   const handleFocus = () => {
@@ -123,12 +121,6 @@ const SearchBar = ({
       <Text style={styles.historyText} numberOfLines={1}>
         {item}
       </Text>
-      <TouchableOpacity
-        onPress={(e) => handleRemoveHistoryItem(index, e)}
-        style={styles.removeButton}
-      >
-        <Ionicons name="close-circle" size={18} color="#94a3b8" />
-      </TouchableOpacity>
     </TouchableOpacity>
   );
 
@@ -232,9 +224,6 @@ const styles = StyleSheet.create({
     color: '#cbd5e1',
     fontSize: 14,
     marginLeft: 10,
-  },
-  removeButton: {
-    padding: 4,
   },
 });
 

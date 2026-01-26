@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -20,10 +20,18 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logAnalyticsEvent, logScreenView } from '../services/firebase';
 import { useAppNavigation } from '../navigation/NavigationHelper';
-import SearchBar from '../components/SearchBar';
+
+// ADDED: Import search history hook and data structures
 import { useSearch } from '../providers/SearchProvider';
-import apiService from '../services/api'; // Import the updated API service
-import Purchases from '../utils/RevenueCatConfig'; // CHANGED: Import from centralized config
+import { samplePlayers } from '../data/players';
+import { teams } from '../data/teams';
+import { statCategories } from '../data/stats';
+
+// ADDED: Import backend API
+import { playerApi } from '../services/api';
+
+import apiService from '../services/api';
+import Purchases from '../utils/RevenueCatConfig';
 
 const { width } = Dimensions.get('window');
 
@@ -763,14 +771,18 @@ const useKalshiGenerateCounter = () => {
 };
 
 // ============ MAIN KALSHI SCREEN ============
-export default function KalshiPredictionsScreen() {
-  const navigation = useAppNavigation();
-  const { searchHistory, addToSearchHistory } = useSearch();
+export default function KalshiPredictionsScreen({ navigation, route }) {
+const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();  
   const generateCounter = useKalshiGenerateCounter();
+  
+  // ADDED: New states for search functionality
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [useBackend, setUseBackend] = useState(true);
+  const [backendError, setBackendError] = useState(null);
   
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [customPrompt, setCustomPrompt] = useState('');
   const [generating, setGenerating] = useState(false);
@@ -785,7 +797,249 @@ export default function KalshiPredictionsScreen() {
     topMarket: 'NFL Combos',
     recordDay: '$466M'
   });
-  const [useRealApi, setUseRealApi] = useState(false); // Toggle between mock and real API
+  const [useRealApi, setUseRealApi] = useState(false);
+
+  // ADDED: Handle navigation parameters
+  useEffect(() => {
+    if (route.params?.initialSearch) {
+      setSearchInput(route.params.initialSearch);
+      setSearchQuery(route.params.initialSearch);
+      handleKalshiSearch(route.params.initialSearch);
+    }
+    if (route.params?.initialSport) {
+      // Kalshi doesn't have sports filter, but we can use it for market filtering
+      setSelectedMarket('Sports');
+    }
+    
+    logScreenView('KalshiPredictionsScreen');
+    loadPredictions();
+    initializeBackendData();
+  }, [route.params]);
+
+  // ADDED: Initialize backend data function
+  const initializeBackendData = async () => {
+    try {
+      // Check if backend is available
+      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/health`);
+      if (response.ok) {
+        setUseBackend(true);
+        await loadPlayersFromBackend();
+      } else {
+        setUseBackend(false);
+        console.log('Backend not available, using sample data');
+      }
+    } catch (error) {
+      console.log('Backend check failed, using sample data:', error.message);
+      setUseBackend(false);
+    }
+  };
+
+  // ADDED: Load players from backend function
+  const loadPlayersFromBackend = useCallback(async (searchQuery = '', positionFilter = 'all') => {
+    try {
+      setRefreshing(true);
+      setBackendError(null);
+      
+      console.log('Fetching Kalshi data from backend...');
+      
+      const filters = {};
+      if (selectedMarket !== 'All') {
+        filters.category = selectedMarket;
+      }
+      
+      let data = [];
+      
+      if (searchQuery) {
+        // Use search endpoint
+        const searchResults = await playerApi.searchPlayers('Kalshi', searchQuery, filters);
+        data = searchResults.players || searchResults;
+        console.log(`Backend search found ${data.length} Kalshi contracts for "${searchQuery}"`);
+      } else {
+        // Get all data
+        const allData = await playerApi.getPlayers('Kalshi', filters);
+        data = allData.players || allData;
+        console.log(`Backend returned ${data.length} Kalshi contracts`);
+      }
+      
+      // If no results from backend and we should fallback to sample data
+      if ((!data || data.length === 0) && process.env.EXPO_PUBLIC_FALLBACK_TO_SAMPLE === 'true') {
+        console.log('No results from backend, falling back to sample data');
+        data = filterSampleData(searchQuery, selectedMarket);
+      }
+      
+      setKalshiPredictions(data);
+      
+    } catch (error) {
+      console.error('Error loading Kalshi data from backend:', error);
+      setBackendError(error.message);
+      
+      // Fallback to sample data if backend fails
+      if (process.env.EXPO_PUBLIC_FALLBACK_TO_SAMPLE === 'true') {
+        console.log('Backend failed, falling back to sample data');
+        const data = filterSampleData(searchQuery, selectedMarket);
+        setKalshiPredictions(data);
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }, [selectedMarket]);
+
+  // ADDED: Filter sample data function
+  const filterSampleData = useCallback((searchQuery = '', marketFilter = 'All') => {
+    const sampleKalshiData = [
+      // Politics
+      { id: '1', question: 'Will Trump win the 2024 presidential election?', category: 'Politics', yesPrice: '0.52', noPrice: '0.48', volume: 'High', analysis: 'Current polls show close race with slight edge to Trump', expires: 'Nov 5, 2024', confidence: 65, edge: '+2.5%' },
+      { id: '2', question: 'Will a woman be elected US President before 2030?', category: 'Politics', yesPrice: '0.45', noPrice: '0.55', volume: 'Medium', analysis: 'Historical trends and recent political shifts suggest increasing possibility', expires: 'Dec 31, 2029', confidence: 72, edge: '+3.1%' },
+      { id: '3', question: 'Will UK rejoin EU before 2030?', category: 'Politics', yesPrice: '0.32', noPrice: '0.68', volume: 'Low', analysis: 'Public sentiment shifting but political barriers remain high', expires: 'Dec 31, 2029', confidence: 58, edge: '+1.8%' },
+      
+      // Economics
+      { id: '4', question: 'Will US recession occur in 2024?', category: 'Economics', yesPrice: '0.38', noPrice: '0.62', volume: 'High', analysis: 'Economic indicators mixed, but strong labor market reduces probability', expires: 'Dec 31, 2024', confidence: 68, edge: '+2.9%' },
+      { id: '5', question: 'Will Bitcoin reach $100,000 in 2024?', category: 'Economics', yesPrice: '0.41', noPrice: '0.59', volume: 'High', analysis: 'Halving event and ETF approvals create bullish sentiment', expires: 'Dec 31, 2024', confidence: 71, edge: '+3.4%' },
+      { id: '6', question: 'Will AI cause mass job displacement by 2030?', category: 'Economics', yesPrice: '0.67', noPrice: '0.33', volume: 'Medium', analysis: 'Automation trends accelerating across multiple industries', expires: 'Dec 31, 2029', confidence: 75, edge: '+4.2%' },
+      
+      // Sports
+      { id: '7', question: 'Will Chiefs win Super Bowl 2025?', category: 'Sports', yesPrice: '0.28', noPrice: '0.72', volume: 'High', analysis: 'Strong team but competitive field reduces probability', expires: 'Feb 9, 2025', confidence: 62, edge: '+1.5%' },
+      { id: '8', question: 'Will LeBron James retire before 2026?', category: 'Sports', yesPrice: '0.34', noPrice: '0.66', volume: 'Medium', analysis: 'Age and injury history increasing retirement probability', expires: 'Dec 31, 2025', confidence: 59, edge: '+1.2%' },
+      { id: '9', question: 'Will US win most gold medals in 2024 Olympics?', category: 'Sports', yesPrice: '0.61', noPrice: '0.39', volume: 'Low', analysis: 'Traditional dominance but China closing gap in certain sports', expires: 'Aug 11, 2024', confidence: 73, edge: '+3.8%' },
+      
+      // Pop Culture
+      { id: '10', question: 'Will Taylor Swift win Album of the Year Grammy 2025?', category: 'Culture', yesPrice: '0.55', noPrice: '0.45', volume: 'High', analysis: 'Critical acclaim and commercial success create strong candidacy', expires: 'Feb 2, 2025', confidence: 70, edge: '+3.6%' },
+      { id: '11', question: 'Will a Marvel movie win Best Picture Oscar before 2030?', category: 'Culture', yesPrice: '0.29', noPrice: '0.71', volume: 'Medium', analysis: 'Genre bias in Academy voting remains significant barrier', expires: 'Dec 31, 2029', confidence: 64, edge: '+2.1%' },
+      { id: '12', question: 'Will AI win a Pulitzer Prize by 2030?', category: 'Culture', yesPrice: '0.48', noPrice: '0.52', volume: 'Low', analysis: 'AI writing quality improving rapidly but ethical concerns remain', expires: 'Dec 31, 2029', confidence: 66, edge: '+2.7%' },
+    ];
+    
+    let filteredData = sampleKalshiData;
+    
+    // Apply market filter
+    if (marketFilter !== 'All') {
+      filteredData = filteredData.filter(item => item.category === marketFilter);
+    }
+    
+    // Apply search filter
+    if (searchQuery) {
+      const searchLower = searchQuery.toLowerCase().trim();
+      console.log(`Searching Kalshi for: "${searchLower}"`);
+      
+      // Split search into keywords
+      const searchKeywords = searchLower.split(/\s+/).filter(keyword => keyword.length > 0);
+      console.log('Search keywords:', searchKeywords);
+      
+      filteredData = filteredData.filter(item => {
+        const itemQuestion = item.question.toLowerCase();
+        const itemCategory = item.category.toLowerCase();
+        const itemAnalysis = item.analysis.toLowerCase();
+        
+        for (const keyword of searchKeywords) {
+          // Skip very common words
+          const commonWords = ['will', 'the', 'and', 'for', 'before', 'after', 'during', 'by'];
+          if (commonWords.includes(keyword)) {
+            continue;
+          }
+          
+          // Check if keyword matches any item property
+          if (
+            itemQuestion.includes(keyword) ||
+            itemCategory.includes(keyword) ||
+            itemAnalysis.includes(keyword) ||
+            itemQuestion.split(' ').some(word => word.includes(keyword)) ||
+            itemAnalysis.split(' ').some(word => word.includes(keyword))
+          ) {
+            console.log(`✓ Contract: matched keyword "${keyword}"`);
+            return true;
+          }
+        }
+        
+        // If we have multiple keywords, require at least one match
+        if (searchKeywords.length > 0) {
+          const nonCommonKeywords = searchKeywords.filter(kw => 
+            !['will', 'the', 'and', 'for', 'before', 'after', 'during', 'by'].includes(kw)
+          );
+          
+          if (nonCommonKeywords.length === 0) {
+            // If all keywords were common words, show all contracts
+            return true;
+          }
+          
+          return false;
+        }
+        
+        return true;
+      });
+      
+      console.log(`Found ${filteredData.length} Kalshi contracts after search`);
+    }
+    
+    console.log(`Sample data filtered: ${filteredData.length} Kalshi contracts`);
+    return filteredData;
+  }, []);
+
+  // ADDED: UPDATED Kalshi prompts with wide assortment
+  const kalshiPrompts = [
+    // Politics & Government
+    "Will there be a government shutdown in 2024?",
+    "Will Supreme Court overturn Roe v. Wade completely?",
+    "Will NATO admit Ukraine before 2026?",
+    "Will China invade Taiwan before 2030?",
+    "Will a third-party candidate win a state in 2024?",
+    
+    // Economics & Finance
+    "Will Fed cut rates more than 100bps in 2024?",
+    "Will commercial real estate crash trigger recession?",
+    "Will BRICS create new global reserve currency?",
+    "Will GameStop squeeze happen again in 2024?",
+    "Will student loan forgiveness pass Congress?",
+    
+    // Technology & AI
+    "Will AGI be achieved before 2035?",
+    "Will quantum computing break Bitcoin by 2030?",
+    "Will Neuralink have human trials in 2024?",
+    "Will deepfake cause major political scandal?",
+    "Will AI write New York Times bestseller?",
+    
+    // Sports & Entertainment
+    "Will Messi win 2024 Ballon d'Or?",
+    "Will NFL expand to London team by 2028?",
+    "Will NBA add expansion team in Las Vegas?",
+    "Will UFC introduce women's featherweight champ?",
+    "Will esports become Olympic event by 2028?",
+    
+    // Pop Culture & Media
+    "Will Barbie win Best Picture Oscar?",
+    "Will Beyoncé tour break revenue records?",
+    "Will Netflix be acquired by 2026?",
+    "Will TikTok be banned in US by 2025?",
+    "Will Marvel release R-rated movie?",
+    
+    // Science & Environment
+    "Will fusion energy achieve net gain by 2030?",
+    "Will 2024 be hottest year on record?",
+    "Will SpaceX land humans on Mars by 2030?",
+    "Will polar bears go extinct by 2050?",
+    "Will major earthquake hit California?",
+    
+    // Healthcare & Medicine
+    "Will Alzheimer's cure be found by 2030?",
+    "Will mRNA cancer vaccine be approved?",
+    "Will life expectancy reach 100 by 2050?",
+    "Will universal healthcare pass in US?",
+    "Will pandemic worse than COVID occur?",
+    
+    // Society & Culture
+    "Will 4-day workweek become standard?",
+    "Will remote work surpass office work?",
+    "Will polyamory become legally recognized?",
+    "Will social media be regulated like tobacco?",
+    "Will US population decline by 2040?",
+  ];
+
+  // ADDED: Handle search submit
+  const handleSearchSubmit = async () => {
+    if (searchInput.trim()) {
+      await addToSearchHistory(searchInput.trim());
+      setSearchQuery(searchInput.trim());
+      handleKalshiSearch(searchInput.trim());
+    }
+  };
 
   // Mock news data with real Kalshi context
   const kalshiNews = [
@@ -831,32 +1085,31 @@ export default function KalshiPredictionsScreen() {
     }
   ];
 
-  // Market categories
+  // Market categories - EXPANDED
   const markets = [
     { id: 'All', name: 'All Markets', icon: 'earth', color: '#8b5cf6' },
-    { id: 'Sports', name: 'Sports', icon: 'american-football', color: '#ef4444' },
     { id: 'Politics', name: 'Politics', icon: 'flag', color: '#3b82f6' },
     { id: 'Economics', name: 'Economics', icon: 'cash', color: '#10b981' },
+    { id: 'Sports', name: 'Sports', icon: 'american-football', color: '#ef4444' },
     { id: 'Culture', name: 'Culture', icon: 'film', color: '#f59e0b' },
+    { id: 'Technology', name: 'Tech', icon: 'hardware-chip', color: '#8b5cf6' },
+    { id: 'Science', name: 'Science', icon: 'flask', color: '#14b8a6' },
+    { id: 'Health', name: 'Health', icon: 'medical', color: '#ec4899' },
   ];
-
-  // AI generation prompts
-  const kalshiPrompts = [
-    "Generate high-probability Kalshi sports contract for tonight",
-    "Create CFTC-regulated political prediction for next week",
-    "Find undervalued economic indicator contract",
-    "Build balanced Kalshi portfolio across markets",
-    "Identify mispriced sports derivative with +EV"
-  ];
-
-  useEffect(() => {
-    logScreenView('KalshiPredictionsScreen');
-    loadPredictions();
-  }, []);
 
   const loadPredictions = async () => {
     try {
       setLoading(true);
+      
+      if (useBackend && process.env.EXPO_PUBLIC_USE_BACKEND === 'true') {
+        await loadPlayersFromBackend(searchQuery, selectedMarket);
+      } else {
+        // Use sample data only
+        const predictions = filterSampleData(searchQuery, selectedMarket);
+        setKalshiPredictions(predictions);
+        setLoading(false);
+        setRefreshing(false);
+      }
       
       if (useRealApi) {
         // REAL API CALL - Using your backend
@@ -864,7 +1117,7 @@ export default function KalshiPredictionsScreen() {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
-            'KALSHI-ACCESS-KEY': 'your-kalshi-access-key-here', // You'll need to store this securely
+            'KALSHI-ACCESS-KEY': 'your-kalshi-access-key-here',
           },
         });
         
@@ -875,16 +1128,14 @@ export default function KalshiPredictionsScreen() {
         const data = await response.json();
         setKalshiPredictions(data.markets || []);
         
-        // Update market data if available
         if (data.platformStats) {
           setMarketData(data.platformStats);
         }
       } else {
-        // MOCK DATA CALL - Using our updated API service
+        // MOCK DATA CALL
         const result = await apiService.getKalshiMarkets();
         setKalshiPredictions(result.markets || []);
         
-        // Update market data from platformStats
         if (result.platformStats) {
           setMarketData(result.platformStats);
         }
@@ -897,11 +1148,8 @@ export default function KalshiPredictionsScreen() {
       
       // Fallback to mock data if real API fails
       try {
-        const mockResult = await apiService.getKalshiMarkets();
-        setKalshiPredictions(mockResult.markets || []);
-        if (mockResult.platformStats) {
-          setMarketData(mockResult.platformStats);
-        }
+        const predictions = filterSampleData(searchQuery, selectedMarket);
+        setKalshiPredictions(predictions);
       } catch (mockError) {
         console.error('Even mock data failed:', mockError);
       }
@@ -909,6 +1157,22 @@ export default function KalshiPredictionsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
+  };
+
+  // ADDED: Handle Kalshi search
+  const handleKalshiSearch = (query) => {
+    setSearchInput(query);
+    setSearchQuery(query);
+    addToSearchHistory(query);
+    
+    logAnalyticsEvent('kalshi_search', {
+      query: query,
+      market: selectedMarket,
+    });
+    
+    // Filter predictions based on search
+    const filtered = filterSampleData(query, selectedMarket);
+    setKalshiPredictions(filtered);
   };
 
   const generateKalshiPrediction = async (prompt) => {
@@ -952,16 +1216,31 @@ export default function KalshiPredictionsScreen() {
           // MOCK AI prediction
           await new Promise(resolve => setTimeout(resolve, 2000));
           
+          // Random category based on prompt content
+          const getCategoryFromPrompt = (prompt) => {
+            if (prompt.toLowerCase().includes('president') || prompt.toLowerCase().includes('election') || prompt.toLowerCase().includes('government')) return 'Politics';
+            if (prompt.toLowerCase().includes('fed') || prompt.toLowerCase().includes('recession') || prompt.toLowerCase().includes('econom')) return 'Economics';
+            if (prompt.toLowerCase().includes('nfl') || prompt.toLowerCase().includes('sports') || prompt.toLowerCase().includes('win')) return 'Sports';
+            if (prompt.toLowerCase().includes('ai') || prompt.toLowerCase().includes('tech') || prompt.toLowerCase().includes('quantum')) return 'Technology';
+            if (prompt.toLowerCase().includes('climate') || prompt.toLowerCase().includes('earthquake') || prompt.toLowerCase().includes('science')) return 'Science';
+            return 'Culture';
+          };
+          
+          const category = getCategoryFromPrompt(prompt);
+          const yesPrice = (Math.random() * 0.4 + 0.3).toFixed(2); // Random between 0.30 and 0.70
+          const noPrice = (1 - parseFloat(yesPrice)).toFixed(2);
+          const confidence = Math.floor(Math.random() * 20 + 60); // 60-80%
+          
           newPrediction = {
             id: `kalshi-${Date.now()}`,
-            question: `AI-Generated: ${prompt.substring(0, 50)}...`,
-            category: 'AI Generated',
-            yesPrice: '0.65',
-            noPrice: '0.35',
+            question: `AI-Generated: ${prompt}`,
+            category: category,
+            yesPrice: yesPrice,
+            noPrice: noPrice,
             volume: 'AI Analysis',
-            confidence: 78,
-            edge: '+4.5%',
-            analysis: `Generated by AI based on market data analysis: ${prompt}. This analysis considers current market trends, historical data, and probability models.`,
+            confidence: confidence,
+            edge: `+${(Math.random() * 5 + 1).toFixed(1)}%`,
+            analysis: `AI analysis of "${prompt}". Based on current market trends, historical data, and probability models, this contract has been generated with ${confidence}% confidence. Market sentiment and recent developments support this prediction.`,
             expires: 'Tomorrow',
             aiGenerated: true,
             generatedFrom: prompt
@@ -990,7 +1269,7 @@ export default function KalshiPredictionsScreen() {
 
   const handlePlaceTrade = async (marketId, side, amount) => {
     try {
-      const price = side === 'yes' ? '0.65' : '0.35'; // Example price
+      const price = side === 'yes' ? '0.65' : '0.35';
       
       const tradeResult = await apiService.placeKalshiTrade(marketId, side, amount, price);
       
@@ -1122,6 +1401,9 @@ export default function KalshiPredictionsScreen() {
       case 'Politics': return '#3b82f6';
       case 'Economics': return '#10b981';
       case 'Culture': return '#f59e0b';
+      case 'Technology': return '#8b5cf6';
+      case 'Science': return '#14b8a6';
+      case 'Health': return '#ec4899';
       case 'AI Generated': return '#8b5cf6';
       default: return '#6b7280';
     }
@@ -1130,6 +1412,50 @@ export default function KalshiPredictionsScreen() {
   const filteredPredictions = selectedMarket === 'All' 
     ? kalshiPredictions 
     : kalshiPredictions.filter(prediction => prediction.category === selectedMarket);
+
+  // ADDED: Search bar component
+  const renderSearchBar = () => {
+    if (!showSearch) return null;
+
+    return (
+      <View style={styles.searchContainer}>
+        <TextInput
+          value={searchInput}
+          onChangeText={setSearchInput}
+          onSubmitEditing={handleSearchSubmit}
+          placeholder="Search Kalshi markets, politics, economics, sports..."
+          style={styles.searchInput}
+          placeholderTextColor="#94a3b8"
+        />
+        <TouchableOpacity onPress={handleSearchSubmit} style={styles.searchButton}>
+          <Ionicons name="search" size={20} color="#000" />
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  // ADDED: Search results info
+  const renderSearchResultsInfo = () => {
+    if (!searchQuery.trim() || filteredPredictions.length === 0) return null;
+    
+    return (
+      <View style={styles.searchResultsInfo}>
+        <Text style={styles.searchResultsText}>
+          {filteredPredictions.length} Kalshi contract{filteredPredictions.length !== 1 ? 's' : ''} found for "{searchQuery}"
+        </Text>
+        <TouchableOpacity 
+          onPress={() => {
+            setSearchQuery('');
+            setSearchInput('');
+            loadPredictions();
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.clearSearchText}>Clear</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   if (loading) {
     return (
@@ -1186,6 +1512,21 @@ export default function KalshiPredictionsScreen() {
           </View>
         </LinearGradient>
       </View>
+
+      {/* ADDED: Search Section */}
+      <View style={styles.searchSection}>
+        {renderSearchBar()}
+        {renderSearchResultsInfo()}
+      </View>
+
+      {/* ADDED: Backend error display */}
+      {backendError && (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>
+            Backend Error: {backendError}. Using sample data.
+          </Text>
+        </View>
+      )}
 
       {/* Generation Counter */}
       <View style={styles.counterContainer}>
@@ -1254,32 +1595,45 @@ export default function KalshiPredictionsScreen() {
         <KalshiContractExplainer />
 
         {/* Market Selector */}
-        <View style={styles.marketSelector}>
-          {markets.map((market) => (
-            <TouchableOpacity
-              key={market.id}
-              style={[
-                styles.marketButton,
-                selectedMarket === market.id && styles.marketButtonActive,
-              ]}
-              onPress={() => setSelectedMarket(market.id)}
-            >
-              {selectedMarket === market.id ? (
-                <LinearGradient
-                  colors={[market.color, market.color]}
-                  style={styles.marketButtonGradient}
-                >
-                  <Ionicons name={market.icon} size={18} color="#fff" />
-                  <Text style={styles.marketButtonTextActive}>{market.name}</Text>
-                </LinearGradient>
-              ) : (
-                <>
-                  <Ionicons name={market.icon} size={18} color="#6b7280" />
-                  <Text style={styles.marketButtonText}>{market.name}</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          ))}
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          style={styles.marketSelectorScroll}
+        >
+          <View style={styles.marketSelector}>
+            {markets.map((market) => (
+              <TouchableOpacity
+                key={market.id}
+                style={[
+                  styles.marketButton,
+                  selectedMarket === market.id && styles.marketButtonActive,
+                ]}
+                onPress={() => setSelectedMarket(market.id)}
+              >
+                {selectedMarket === market.id ? (
+                  <LinearGradient
+                    colors={[market.color, market.color]}
+                    style={styles.marketButtonGradient}
+                  >
+                    <Ionicons name={market.icon} size={18} color="#fff" />
+                    <Text style={styles.marketButtonTextActive}>{market.name}</Text>
+                  </LinearGradient>
+                ) : (
+                  <>
+                    <Ionicons name={market.icon} size={18} color="#6b7280" />
+                    <Text style={styles.marketButtonText}>{market.name}</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+
+        {/* ADDED: Debug display */}
+        <View style={{paddingHorizontal: 16, marginBottom: 8}}>
+          <Text style={{color: 'white', fontSize: 12}}>
+            DEBUG: Search = "{searchQuery}", Market Filter = "{selectedMarket}"
+          </Text>
         </View>
 
         {/* Generate Prediction Section */}
@@ -1301,7 +1655,7 @@ export default function KalshiPredictionsScreen() {
             showsHorizontalScrollIndicator={false}
             style={styles.promptsScroll}
           >
-            {kalshiPrompts.map((prompt, index) => (
+            {kalshiPrompts.slice(0, 10).map((prompt, index) => (
               <TouchableOpacity
                 key={index}
                 style={styles.promptChip}
@@ -1462,6 +1816,25 @@ export default function KalshiPredictionsScreen() {
         </View>
       </Modal>
       
+      {/* Floating Search Button */}
+      {!showSearch && (
+        <TouchableOpacity
+          style={[styles.floatingSearchButton, {backgroundColor: '#8b5cf6'}]}
+          onPress={() => {
+            setShowSearch(true);
+            logAnalyticsEvent('kalshi_search_toggle');
+          }}
+          activeOpacity={0.7}
+        >
+          <LinearGradient
+            colors={['#8b5cf6', '#7c3aed']}
+            style={styles.floatingSearchContent}
+          >
+            <Ionicons name="search" size={24} color="white" />
+          </LinearGradient>
+        </TouchableOpacity>
+      )}
+      
       <KalshiAnalyticsBox marketData={marketData} setMarketData={setMarketData} />
     </View>
   );
@@ -1564,6 +1937,62 @@ const styles = StyleSheet.create({
     marginTop: 5,
     fontWeight: '500',
   },
+  // ADDED: Search Styles
+  searchSection: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    marginBottom: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1f2937',
+    paddingVertical: 8,
+  },
+  searchButton: {
+    padding: 8,
+  },
+  searchResultsInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#f1f5f9',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  searchResultsText: {
+    fontSize: 13,
+    color: '#475569',
+    fontWeight: '500',
+  },
+  clearSearchText: {
+    fontSize: 13,
+    color: '#8b5cf6',
+    fontWeight: '600',
+  },
+  errorContainer: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    margin: 16,
+  },
+  errorText: {
+    color: '#dc2626',
+    fontSize: 12,
+  },
   counterContainer: {
     backgroundColor: '#1e293b',
     borderRadius: 15,
@@ -1659,10 +2088,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontStyle: 'italic',
   },
+  marketSelectorScroll: {
+    marginHorizontal: 16,
+    marginBottom: 20,
+  },
   marketSelector: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    margin: 16,
     backgroundColor: '#1e293b',
     borderRadius: 15,
     padding: 10,
@@ -1674,9 +2105,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 12,
     marginHorizontal: 4,
-    flex: 1,
     justifyContent: 'center',
     backgroundColor: '#0f172a',
+    minWidth: 80,
   },
   marketButtonActive: {
     backgroundColor: 'transparent',
@@ -2136,5 +2567,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#64748b',
     fontWeight: '600',
+  },
+  // ADDED: Floating Search Button
+  floatingSearchButton: {
+    position: 'absolute',
+    bottom: 100,
+    right: 20,
+    borderRadius: 25,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    overflow: 'hidden',
+  },
+  floatingSearchContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 15,
+    borderRadius: 25,
   },
 });

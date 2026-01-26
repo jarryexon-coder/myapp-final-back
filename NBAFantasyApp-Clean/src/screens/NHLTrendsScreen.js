@@ -1,4 +1,4 @@
-// src/screens/NHLTrendsScreen.js - FIXED VERSION
+// src/screens/NHLTrendsScreen.js - UPDATED VERSION WITH SEARCH FUNCTIONALITY
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -11,12 +11,25 @@ import {
   RefreshControl,
   FlatList,
   Dimensions,
-  Animated
+  Animated,
+  TextInput
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import SearchBar from '../components/SearchBar';
+
 import { useSearch } from '../providers/SearchProvider';
+
+// Fix 4: Import data structures
+import { samplePlayers } from '../data/players';
+import { teams } from '../data/teams';
+import { statCategories } from '../data/stats';
+
+// Fix 5: Import backend API
+import { playerApi } from '../services/api';
+
+// Import Firebase Analytics
+import { logAnalyticsEvent, logScreenView } from '../services/firebase';
+
 import usePremiumAccess from '../hooks/usePremiumAccess';
 
 const { width } = Dimensions.get('window');
@@ -35,19 +48,33 @@ const STANDING_ROW_HEIGHT = 56;
 const PLAYER_ROW_HEIGHT = 56;
 const SEARCH_RESULT_ITEM_HEIGHT = 84;
 
-export default function NHLScreen({ navigation }) {
+export default function NHLScreen({ navigation, route }) {
+  // Fix 2: Add Search Implementation
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  // Fix 1: Add Search History Hook
+  const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();
+  
   const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading] = useState(false); // Start as false to avoid initial delay
+  const [loading, setLoading] = useState(false);
   const [standings, setStandings] = useState([]);
   const [games, setGames] = useState([]);
   const [players, setPlayers] = useState([]);
   const [activeTab, setActiveTab] = useState('standings');
-  const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState(null);
   const [searchCategory, setSearchCategory] = useState('all');
-  const [showContent, setShowContent] = useState(false); // New state to control content visibility
+  const [showContent, setShowContent] = useState(false);
   
-  const { searchHistory, addToSearchHistory } = useSearch();
+  // Fix 4: Add data structure states
+  const [selectedTeam, setSelectedTeam] = useState('all');
+  const [filter, setFilter] = useState('all');
+  
+  // Fix 5: Add backend API states
+  const [useBackend, setUseBackend] = useState(true);
+  const [backendError, setBackendError] = useState(null);
+  const [realPlayers, setRealPlayers] = useState([]);
+  
   const premium = usePremiumAccess();
   
   // Animation for fade-in effect
@@ -82,9 +109,137 @@ export default function NHLScreen({ navigation }) {
     { id: 6, name: 'Leon Draisaitl', team: 'EDM', goals: 22, assists: 34, points: 56, position: 'C' },
   ];
 
+  // Fix 3: Handle navigation params
+  useEffect(() => {
+    if (route.params?.initialSearch) {
+      setSearchInput(route.params.initialSearch);
+      setSearchQuery(route.params.initialSearch);
+    }
+    if (route.params?.initialSport) {
+      // Set initial sport if needed
+    }
+  }, [route.params]);
+
   useEffect(() => {
     loadData();
+    logScreenView('NHLTrendsScreen');
   }, []);
+
+  // Fix 4: Create filterSamplePlayers function
+  const filterSamplePlayers = useCallback((searchQuery = '', positionFilter = 'all', teamFilter = 'all') => {
+    const sportPlayers = samplePlayers['NHL'] || [];
+    
+    let filteredPlayers = sportPlayers;
+    
+    // Apply position filter
+    if (positionFilter !== 'all') {
+      filteredPlayers = sportPlayers.filter(player => {
+        return player.position.includes(positionFilter) || player.position.split('/').includes(positionFilter);
+      });
+    }
+    
+    // Apply team filter
+    if (teamFilter !== 'all') {
+      const team = teams['NHL']?.find(t => t.id === teamFilter);
+      if (team) {
+        filteredPlayers = filteredPlayers.filter(player => 
+          player.team === team.name
+        );
+      }
+    }
+    
+    // Apply search filter
+    if (searchQuery) {
+      const searchLower = searchQuery.toLowerCase().trim();
+      const searchKeywords = searchLower.split(/\s+/).filter(keyword => keyword.length > 0);
+      
+      filteredPlayers = filteredPlayers.filter(player => {
+        const playerName = player.name.toLowerCase();
+        const playerTeam = player.team.toLowerCase();
+        const playerPosition = player.position ? player.position.toLowerCase() : '';
+        
+        for (const keyword of searchKeywords) {
+          const commonWords = ['player', 'players', 'stats', 'stat', 'statistics'];
+          if (commonWords.includes(keyword)) continue;
+          
+          if (
+            playerName.includes(keyword) ||
+            playerTeam.includes(keyword) ||
+            playerPosition.includes(keyword) ||
+            playerTeam.split(' ').some(word => word.includes(keyword)) ||
+            playerName.split(' ').some(word => word.includes(keyword))
+          ) {
+            return true;
+          }
+        }
+        
+        return searchKeywords.length === 0;
+      });
+    }
+    
+    console.log(`Sample data filtered: ${filteredPlayers.length} players`);
+    return filteredPlayers;
+  }, []);
+
+  // Fix 5: Create loadPlayersFromBackend function
+  const loadPlayersFromBackend = useCallback(async (searchQuery = '', positionFilter = 'all') => {
+    try {
+      setLoading(true);
+      setBackendError(null);
+      
+      console.log('Fetching players from backend...');
+      
+      const filters = {};
+      if (positionFilter !== 'all') {
+        filters.position = positionFilter;
+      }
+      
+      let players = [];
+      
+      if (searchQuery) {
+        // Use search endpoint
+        const searchResults = await playerApi.searchPlayers('NHL', searchQuery, filters);
+        players = searchResults.players || searchResults;
+        console.log(`Backend search found ${players.length} players for "${searchQuery}"`);
+      } else {
+        // Get all players with optional position filter
+        const allPlayers = await playerApi.getPlayers('NHL', filters);
+        players = allPlayers.players || allPlayers;
+        console.log(`Backend returned ${players.length} players for NHL`);
+      }
+      
+      // If no results from backend and we should fallback to sample data
+      if ((!players || players.length === 0) && process.env.EXPO_PUBLIC_FALLBACK_TO_SAMPLE === 'true') {
+        console.log('No results from backend, falling back to sample data');
+        players = filterSamplePlayers(searchQuery, positionFilter);
+      }
+      
+      setRealPlayers(players);
+      
+    } catch (error) {
+      console.error('Error loading players from backend:', error);
+      setBackendError(error.message);
+      
+      // Fallback to sample data if backend fails
+      if (process.env.EXPO_PUBLIC_FALLBACK_TO_SAMPLE === 'true') {
+        console.log('Backend failed, falling back to sample data');
+        const players = filterSamplePlayers(searchQuery, positionFilter);
+        setRealPlayers(players);
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [filterSamplePlayers]);
+
+  // Fix 2: Update handleSearchSubmit with search history
+  const handleSearchSubmit = async () => {
+    if (searchInput.trim()) {
+      await addToSearchHistory(searchInput.trim());
+      setSearchQuery(searchInput.trim());
+      handleSearch(searchInput.trim());
+    }
+  };
 
   const loadData = () => {
     // Load mock data immediately without delay
@@ -103,7 +258,7 @@ export default function NHLScreen({ navigation }) {
     setShowContent(true);
   };
 
-  // Optimized search function with useCallback
+  // Fix 2: Update search function with enhanced logic
   const handleSearch = useCallback((query) => {
     setSearchQuery(query);
     
@@ -112,17 +267,63 @@ export default function NHLScreen({ navigation }) {
       return;
     }
     
-    addToSearchHistory(query);
-    const lowerQuery = query.toLowerCase();
+    const lowerQuery = query.toLowerCase().trim();
+    console.log(`Searching for: "${lowerQuery}" in ALL NHL data`);
+    
+    // Split search into keywords
+    const searchKeywords = lowerQuery.split(/\s+/).filter(keyword => keyword.length > 0);
+    console.log('Search keywords:', searchKeywords);
     
     // Search across all categories
     const allResults = [];
     
-    // Search standings
-    const standingsResults = mockStandings.filter(item =>
-      item.team.toLowerCase().includes(lowerQuery) ||
-      item.conference.toLowerCase().includes(lowerQuery)
-    );
+    // Search standings with enhanced logic
+    const standingsResults = mockStandings.filter(item => {
+      const itemTeam = item.team.toLowerCase();
+      const itemConference = item.conference.toLowerCase();
+      
+      // Try exact team name matching first
+      if (searchKeywords.length >= 2) {
+        const possibleTeamName = searchKeywords.join(' ');
+        if (itemTeam.includes(possibleTeamName)) {
+          console.log(`✓ Team ${item.team}: exact match for "${possibleTeamName}"`);
+          return true;
+        }
+      }
+      
+      // Check each keyword
+      for (const keyword of searchKeywords) {
+        const commonWords = ['team', 'teams', 'stats', 'stat', 'statistics', 'wins', 'losses', 'points'];
+        if (commonWords.includes(keyword)) {
+          continue;
+        }
+        
+        if (
+          itemTeam.includes(keyword) ||
+          itemConference.includes(keyword) ||
+          itemTeam.split(' ').some(word => word.includes(keyword))
+        ) {
+          console.log(`✓ Team ${item.team}: matched keyword "${keyword}"`);
+          return true;
+        }
+      }
+      
+      // If we have multiple keywords, require at least one match
+      if (searchKeywords.length > 0) {
+        const nonCommonKeywords = searchKeywords.filter(kw => 
+          !['team', 'teams', 'stats', 'stat', 'statistics', 'wins', 'losses', 'points'].includes(kw)
+        );
+        
+        if (nonCommonKeywords.length === 0) {
+          return true;
+        }
+        
+        return false;
+      }
+      
+      return true;
+    });
+    
     if (standingsResults.length > 0) {
       allResults.push(...standingsResults.map(item => ({
         ...item,
@@ -131,11 +332,54 @@ export default function NHLScreen({ navigation }) {
       })));
     }
     
-    // Search games
-    const gamesResults = mockGames.filter(item =>
-      item.home.toLowerCase().includes(lowerQuery) ||
-      item.away.toLowerCase().includes(lowerQuery)
-    );
+    // Search games with enhanced logic
+    const gamesResults = mockGames.filter(item => {
+      const itemHome = item.home.toLowerCase();
+      const itemAway = item.away.toLowerCase();
+      
+      // Try exact team name matching first
+      if (searchKeywords.length >= 2) {
+        const possibleTeamName = searchKeywords.join(' ');
+        if (itemHome.includes(possibleTeamName) || itemAway.includes(possibleTeamName)) {
+          console.log(`✓ Game ${item.away} @ ${item.home}: exact match for "${possibleTeamName}"`);
+          return true;
+        }
+      }
+      
+      // Check each keyword
+      for (const keyword of searchKeywords) {
+        const commonWords = ['game', 'games', 'vs', 'at', 'score', 'status', 'final', 'ot'];
+        if (commonWords.includes(keyword)) {
+          continue;
+        }
+        
+        if (
+          itemHome.includes(keyword) ||
+          itemAway.includes(keyword) ||
+          itemHome.split(' ').some(word => word.includes(keyword)) ||
+          itemAway.split(' ').some(word => word.includes(keyword))
+        ) {
+          console.log(`✓ Game ${item.away} @ ${item.home}: matched keyword "${keyword}"`);
+          return true;
+        }
+      }
+      
+      // If we have multiple keywords, require at least one match
+      if (searchKeywords.length > 0) {
+        const nonCommonKeywords = searchKeywords.filter(kw => 
+          !['game', 'games', 'vs', 'at', 'score', 'status', 'final', 'ot'].includes(kw)
+        );
+        
+        if (nonCommonKeywords.length === 0) {
+          return true;
+        }
+        
+        return false;
+      }
+      
+      return true;
+    });
+    
     if (gamesResults.length > 0) {
       allResults.push(...gamesResults.map(item => ({
         ...item,
@@ -144,12 +388,90 @@ export default function NHLScreen({ navigation }) {
       })));
     }
     
-    // Search players
-    const playersResults = mockPlayers.filter(item =>
-      item.name.toLowerCase().includes(lowerQuery) ||
-      item.team.toLowerCase().includes(lowerQuery) ||
-      item.position.toLowerCase().includes(lowerQuery)
-    );
+    // Search players with enhanced logic (similar to loadPlayers function)
+    const playersResults = mockPlayers.filter(player => {
+      const playerName = player.name.toLowerCase();
+      const playerTeam = player.team.toLowerCase();
+      const playerPosition = player.position ? player.position.toLowerCase() : '';
+      
+      // Try exact team name matching first
+      if (searchKeywords.length >= 2) {
+        const possibleTeamName = searchKeywords.join(' ');
+        if (playerTeam.includes(possibleTeamName)) {
+          console.log(`✓ Player ${player.name}: exact team match for "${possibleTeamName}"`);
+          return true;
+        }
+      }
+      
+      // Check each keyword
+      for (const keyword of searchKeywords) {
+        const commonWords = ['player', 'players', 'stats', 'stat', 'statistics', 'goals', 'assists', 'points'];
+        if (commonWords.includes(keyword)) {
+          continue;
+        }
+        
+        if (
+          playerName.includes(keyword) ||
+          playerTeam.includes(keyword) ||
+          playerPosition.includes(keyword) ||
+          playerTeam.split(' ').some(word => word.includes(keyword)) ||
+          playerName.split(' ').some(word => word.includes(keyword))
+        ) {
+          console.log(`✓ Player ${player.name}: matched keyword "${keyword}"`);
+          return true;
+        }
+      }
+      
+      // If we have multiple keywords, require at least one match
+      if (searchKeywords.length > 0) {
+        const nonCommonKeywords = searchKeywords.filter(kw => 
+          !['player', 'players', 'stats', 'stat', 'statistics', 'goals', 'assists', 'points'].includes(kw)
+        );
+        
+        if (nonCommonKeywords.length === 0) {
+          return true;
+        }
+        
+        return false;
+      }
+      
+      return true;
+    });
+    
+    // If no results, try fuzzy matching for players
+    if (playersResults.length === 0 && searchKeywords.length > 0) {
+      const nonCommonKeywords = searchKeywords.filter(kw => 
+        !['player', 'players', 'stats', 'stat', 'statistics', 'goals', 'assists', 'points'].includes(kw)
+      );
+      
+      if (nonCommonKeywords.length > 0) {
+        const mainKeyword = nonCommonKeywords[0];
+        console.log(`Trying fuzzy search for: "${mainKeyword}"`);
+        
+        const fuzzyPlayers = mockPlayers.filter(player => {
+          const playerName = player.name.toLowerCase();
+          const playerTeam = player.team.toLowerCase();
+          const playerPosition = player.position ? player.position.toLowerCase() : '';
+          
+          const matches = 
+            playerName.includes(mainKeyword) ||
+            playerTeam.includes(mainKeyword) ||
+            playerPosition.includes(mainKeyword) ||
+            playerName.split(' ').some(word => word.startsWith(mainKeyword.substring(0, 3))) ||
+            playerTeam.split(' ').some(word => word.startsWith(mainKeyword.substring(0, 3)));
+          
+          if (matches) {
+            console.log(`✓ Player ${player.name}: fuzzy matched "${mainKeyword}"`);
+          }
+          return matches;
+        });
+        
+        if (fuzzyPlayers.length > 0) {
+          playersResults.push(...fuzzyPlayers);
+        }
+      }
+    }
+    
     if (playersResults.length > 0) {
       allResults.push(...playersResults.map(item => ({
         ...item,
@@ -178,12 +500,27 @@ export default function NHLScreen({ navigation }) {
     } else {
       setSearchCategory('all');
     }
-  }, [addToSearchHistory]);
+    
+    logAnalyticsEvent('nhl_search', { query, results: allResults.length });
+  }, [mockStandings, mockGames, mockPlayers]);
 
   const clearSearch = () => {
+    setSearchInput('');
     setSearchQuery('');
     setSearchResults(null);
     setSearchCategory('all');
+  };
+
+  // Fix 2: Update filter change handler
+  const handleFilterChange = async (newFilter) => {
+    await logAnalyticsEvent('nhl_filter_change', {
+      from_filter: filter,
+      to_filter: newFilter,
+    });
+    setFilter(newFilter);
+    // Clear search when changing filters for better UX
+    setSearchQuery('');
+    setSearchInput('');
   };
 
   const onRefresh = () => {
@@ -192,6 +529,39 @@ export default function NHLScreen({ navigation }) {
       setRefreshing(false);
     }, 500);
   };
+
+  // Fix 4: Render team selector component
+  const renderTeamSelector = () => (
+    <View style={teamStyles.teamSection}>
+      <Text style={teamStyles.teamSectionTitle}>Filter by Team</Text>
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false}
+        style={teamStyles.teamSelector}
+      >
+        <TouchableOpacity
+          style={[teamStyles.teamPill, selectedTeam === 'all' && teamStyles.activeTeamPill]}
+          onPress={() => setSelectedTeam('all')}
+        >
+          <Text style={[teamStyles.teamText, selectedTeam === 'all' && teamStyles.activeTeamText]}>
+            All Teams
+          </Text>
+        </TouchableOpacity>
+        
+        {teams['NHL']?.map(team => (
+          <TouchableOpacity
+            key={team.id}
+            style={[teamStyles.teamPill, selectedTeam === team.id && teamStyles.activeTeamPill]}
+            onPress={() => setSelectedTeam(team.id)}
+          >
+            <Text style={[teamStyles.teamText, selectedTeam === team.id && teamStyles.activeTeamText]}>
+              {team.name.split(' ').pop()} {/* Show just last name */}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
 
   // OPTIMIZED: Use useCallback for render functions
   const renderSearchResultItem = useCallback(({ item }) => (
@@ -313,8 +683,6 @@ export default function NHLScreen({ navigation }) {
     );
   }
 
-  // REMOVED PAYWALL CHECK - Directly show content
-
   return (
     <SafeAreaView style={styles.container}>
       <LinearGradient
@@ -339,17 +707,41 @@ export default function NHLScreen({ navigation }) {
           </View>
         </View>
 
-        {/* Search Bar */}
-        <SearchBar
-          placeholder="Search teams, players, games..."
-          onSearch={handleSearch}
-          searchHistory={searchHistory}
-          suggestions={NHL_SEARCH_PROMPTS}
-          style={styles.searchBar}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          onClear={clearSearch}
-        />
+        {/* Fix 2: Updated Search Bar Implementation */}
+        <View style={styles.searchContainer}>
+          <TextInput
+            value={searchInput}
+            onChangeText={setSearchInput}
+            onSubmitEditing={handleSearchSubmit}
+            placeholder="Search teams, players, games..."
+            placeholderTextColor="#94a3b8"
+            style={styles.searchInput}
+          />
+          <TouchableOpacity onPress={handleSearchSubmit} style={styles.searchButton}>
+            <Ionicons name="search" size={20} color="#000" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Fix 4: Debug display */}
+        {searchQuery && (
+          <View style={{paddingHorizontal: 16, marginBottom: 8}}>
+            <Text style={{color: 'white', fontSize: 12}}>
+              DEBUG: Filter = "{filter}", Search = "{searchQuery}"
+            </Text>
+          </View>
+        )}
+
+        {/* Fix 4: Team Selector */}
+        {searchResults && renderTeamSelector()}
+
+        {/* Fix 5: Error display */}
+        {backendError && (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>
+              Backend Error: {backendError}. Using sample data.
+            </Text>
+          </View>
+        )}
 
         {/* Search Results */}
         {searchResults ? (
@@ -552,6 +944,44 @@ export default function NHLScreen({ navigation }) {
   );
 }
 
+// Fix 4: Team styles
+const teamStyles = StyleSheet.create({
+  teamSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#1e293b',
+    marginBottom: 16,
+  },
+  teamSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#94a3b8',
+    marginBottom: 8,
+  },
+  teamSelector: {
+    height: 40,
+  },
+  teamPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#334155',
+    marginRight: 8,
+  },
+  activeTeamPill: {
+    backgroundColor: '#3b82f6',
+  },
+  teamText: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  activeTeamText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+});
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   gradient: { flex: 1 },
@@ -566,6 +996,43 @@ const styles = StyleSheet.create({
     marginTop: 20,
     fontSize: 16,
   },
+  
+  // Fix 2: Search container styles
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    margin: 16,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#000',
+  },
+  searchButton: {
+    padding: 8,
+  },
+  
+  // Fix 5: Error styles
+  errorContainer: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    margin: 16,
+    marginTop: 0,
+  },
+  errorText: {
+    color: '#dc2626',
+    fontSize: 12,
+  },
+  
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -594,11 +1061,6 @@ const styles = StyleSheet.create({
   },
   headerRight: { 
     width: 40 
-  },
-  searchBar: {
-    margin: 16,
-    marginTop: 8,
-    marginBottom: 12,
   },
   tabsContainer: {
     flexDirection: 'row',

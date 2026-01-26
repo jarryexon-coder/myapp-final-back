@@ -1,64 +1,58 @@
+# Created for React Native/Expo NBA Fantasy App
+
 # Dependencies
 node_modules/
-.expo/
-
-# Production build
-build/
-dist/
-
-# Environment variables
-.env
-.env.production
-.env.local
-
-# Backup files
-*.backup
-*.backup.*
-App.js.backup*
-App.tsx.backup
-MinimalApp.js
-
-# Duplicate app directories
-MyAppFixed/
-MyApp_Final/
-
-# iOS/Android build files
-ios/build/
-android/app/build/
-android/.gradle/
-
-# Logs
-*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# IDE files
+# Expo
+.expo/
+.expo-shared/
+web-build/
+dist/
+
+# Android
+android/.gradle/
+android/build/
+android/local.properties
+android/*.apk
+android/*.ap_
+android/*.aab
+
+# iOS
+ios/build/
+ios/Pods/
+*.xcworkspace
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.moved-aside
+*.xcuserstate
+
+# Environment
+.env
+.env.local
+.env*.local
+.env.production
+
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# OS files
+# OS
 .DS_Store
 Thumbs.db
 
-# Temporary files
-*.patch
-tmp/
-temp/
+# Backup files
+*.backup
+*.backup_*
+*backup_*
+App.js.backup*
+App.tsx.backup
 
-# Test and script files
-test-*
-check-*
-verify-*
-update-*
-fix-*
-migrate-*
-scripts/
-
-# Expo
-.expo-shared/
-
-# Railway
-.railway/
+# Test/analysis files
+reports/
+*.log

@@ -18,8 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../hooks/useAuth';
 import Constants from 'expo-constants';
 
-// IMPORT ERROR UTILS FOR ERROR BOUNDARY
-import { ErrorUtils } from 'react-native';
+// REMOVED: ErrorUtils import (it's not available from react-native)
 
 // FILE 1: Expo Go Detection Function - UPDATED
 const checkExpoGo = () => {
@@ -181,14 +180,29 @@ const getRevenueCatIdentifier = (planId) => {
 };
 
 export default function SubscriptionScreen({ navigation }) {
-  // ADD THIS ERROR BOUNDARY BLOCK AT THE VERY START
+  // SAFE ERROR HANDLING - Replace the problematic block
   React.useEffect(() => {
-    const originalErrorHandler = ErrorUtils.getGlobalHandler();
-    ErrorUtils.setGlobalHandler((error, isFatal) => {
-      console.error('🔴 GLOBAL ERROR CAUGHT:', error);
-      console.error('Stack:', error.stack);
-      originalErrorHandler(error, isFatal);
-    });
+    try {
+      // Check if ErrorUtils exists in the global scope
+      if (typeof global !== 'undefined' && global.ErrorUtils) {
+        const originalErrorHandler = global.ErrorUtils.getGlobalHandler();
+        global.ErrorUtils.setGlobalHandler((error, isFatal) => {
+          console.error('🔴 GLOBAL ERROR CAUGHT IN SUBSCRIPTION SCREEN:', error);
+          console.error('Stack:', error?.stack);
+          
+          // Call original handler if it exists
+          if (originalErrorHandler) {
+            originalErrorHandler(error, isFatal);
+          }
+        });
+        console.log('✅ Error handler set up for SubscriptionScreen');
+      } else {
+        console.log('⚠️ ErrorUtils not available in this environment');
+      }
+    } catch (error) {
+      console.log('⚠️ Error setting up error handler:', error.message);
+      // Don't crash the app if error handling setup fails
+    }
   }, []);
 
   const { user } = useAuth();

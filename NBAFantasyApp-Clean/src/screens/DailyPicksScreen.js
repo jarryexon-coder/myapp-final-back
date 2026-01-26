@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+// src/screens/DailyPicksScreen.js - UPDATED VERSION WITH SEARCH FUNCTIONALITY
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -25,11 +26,611 @@ import { logAnalyticsEvent, logScreenView } from '../services/firebase';
 // Import navigation helper
 import { useAppNavigation } from '../navigation/NavigationHelper';
 import SearchBar from '../components/SearchBar';
+
 import { useSearch } from '../providers/SearchProvider';
+
 import useDailyLocks from '../hooks/useDailyLocks';
-import Purchases from '../utils/RevenueCatConfig'; // CHANGED: Import from centralized config
+import Purchases from '../utils/RevenueCatConfig';
+
+// Fix 4: Import data structures
+import { samplePlayers } from '../data/players';
+import { teams } from '../data/teams';
+import { statCategories } from '../data/stats';
+
+// Fix 5: Import backend API
+import { playerApi } from '../services/api';
 
 const { width } = Dimensions.get('window');
+
+// Informative Text Box Component
+const InformativeTextBox = () => {
+  return (
+    <View style={infoBoxStyles.container}>
+      <LinearGradient
+        colors={['#f59e0b', '#d97706']}
+        style={infoBoxStyles.gradient}
+      >
+        <View style={infoBoxStyles.header}>
+          <Ionicons name="information-circle" size={24} color="white" />
+          <Text style={infoBoxStyles.title}>Daily Picks Explained</Text>
+        </View>
+        
+        <View style={infoBoxStyles.content}>
+          <View style={infoBoxStyles.tipItem}>
+            <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+            <Text style={infoBoxStyles.tipText}>
+              Daily picks are AI-curated selections with the highest probability of success
+            </Text>
+          </View>
+          
+          <View style={infoBoxStyles.tipItem}>
+            <Ionicons name="trending-up" size={16} color="#3b82f6" />
+            <Text style={infoBoxStyles.tipText}>
+              Updated every 24 hours based on the latest odds and performance data
+            </Text>
+          </View>
+          
+          <View style={infoBoxStyles.tipItem}>
+            <Ionicons name="shield-checkmark" size={16} color="#8b5cf6" />
+            <Text style={infoBoxStyles.tipText}>
+              Each pick includes detailed analysis, confidence scores, and expected value
+            </Text>
+          </View>
+          
+          <View style={infoBoxStyles.tipItem}>
+            <Ionicons name="flash" size={16} color="#f59e0b" />
+            <Text style={infoBoxStyles.tipText}>
+              Get 2 free daily picks - upgrade for unlimited access to all picks
+            </Text>
+          </View>
+        </View>
+        
+        <View style={infoBoxStyles.footer}>
+          <Text style={infoBoxStyles.footerText}>
+            Last updated: Today, 9:00 AM ET
+          </Text>
+        </View>
+      </LinearGradient>
+    </View>
+  );
+};
+
+const infoBoxStyles = StyleSheet.create({
+  container: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    marginHorizontal: 20,
+    marginTop: 10,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#d97706',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+  },
+  gradient: {
+    padding: 20,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+    marginLeft: 10,
+    flex: 1,
+  },
+  content: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 12,
+    padding: 15,
+  },
+  tipItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  tipText: {
+    color: 'white',
+    fontSize: 14,
+    lineHeight: 20,
+    marginLeft: 10,
+    flex: 1,
+  },
+  footer: {
+    marginTop: 15,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  footerText: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 12,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+});
+
+// FIXED: Daily Pick Generator Component - Different from PredictionsScreen
+const DailyPickGenerator = ({ onGenerate, isGenerating }) => {
+  const [generatedToday, setGeneratedToday] = useState(false);
+  const [generatedPicks, setGeneratedPicks] = useState([]);
+
+  useEffect(() => {
+    checkDailyGeneration();
+    loadGeneratedPicks();
+  }, []);
+
+  const checkDailyGeneration = async () => {
+    try {
+      const today = new Date().toDateString();
+      const lastGenerated = await AsyncStorage.getItem('last_daily_pick_generation');
+      setGeneratedToday(lastGenerated === today);
+    } catch (error) {
+      console.error('Error checking daily generation:', error);
+    }
+  };
+
+  const loadGeneratedPicks = async () => {
+    try {
+      const storedPicks = await AsyncStorage.getItem('generated_daily_picks');
+      if (storedPicks) {
+        setGeneratedPicks(JSON.parse(storedPicks));
+      }
+    } catch (error) {
+      console.error('Error loading generated picks:', error);
+    }
+  };
+
+  const generateSamplePicks = () => {
+    // Generate completely different picks than PredictionsScreen
+    const picks = [
+      {
+        id: 1,
+        type: 'High Confidence',
+        sport: 'NBA',
+        pick: 'Giannis Antetokounmpo Over 30.5 Points + 10.5 Rebounds',
+        confidence: 94,
+        analysis: 'Dominant performance expected against weak interior defense. Averaging 32.8 PPG + 12.2 RPG last 7 games.',
+        odds: '+180',
+        probability: '91%',
+        expectedValue: '+12.4%',
+        keyStat: '27.2% rebound rate vs opponent',
+        trend: 'Double-double in 8 of last 10 games',
+        timestamp: 'Today • 8:00 PM ET'
+      },
+      {
+        id: 2,
+        type: 'Value Play',
+        sport: 'NFL',
+        pick: 'Dak Prescott Over 275.5 Passing Yards',
+        confidence: 86,
+        analysis: 'Facing 28th ranked pass defense. High-scoring game expected with total set at 52.5 points.',
+        odds: '-115',
+        probability: '83%',
+        expectedValue: '+8.7%',
+        keyStat: 'Averaging 291.4 pass YPG at home',
+        trend: 'Over 275 in 6 of last 7 home games',
+        timestamp: 'Tonight • 8:20 PM ET'
+      },
+      {
+        id: 3,
+        type: 'Lock Pick',
+        sport: 'MLB',
+        pick: 'Mookie Betts to Record 2+ Hits',
+        confidence: 89,
+        analysis: 'Batting .372 vs left-handed pitching this season. Facing lefty with .312 BAA to right-handed hitters.',
+        odds: '+140',
+        probability: '78%',
+        expectedValue: '+15.2%',
+        keyStat: 'Multi-hit games in 11 of last 16',
+        trend: '.342 batting avg in day games',
+        timestamp: 'Tomorrow • 1:05 PM ET'
+      }
+    ];
+    return picks;
+  };
+
+  const handleGenerate = async () => {
+    const today = new Date().toDateString();
+    
+    try {
+      // Generate new picks (different from PredictionsScreen)
+      const newPicks = generateSamplePicks();
+      
+      // Save to storage
+      await AsyncStorage.setItem('last_daily_pick_generation', today);
+      await AsyncStorage.setItem('generated_daily_picks', JSON.stringify(newPicks));
+      
+      setGeneratedToday(true);
+      setGeneratedPicks(newPicks);
+      
+      // Call parent's onGenerate function - no navigation logic here
+      onGenerate?.();
+      
+      Alert.alert(
+        'Daily Picks Generated!',
+        '3 high-probability daily picks have been generated.',
+        [{ text: 'OK', style: 'default' }]
+      );
+      
+    } catch (error) {
+      console.error('Error generating daily picks:', error);
+      Alert.alert('Error', 'Failed to generate daily picks');
+    }
+  };
+
+  const renderPickItem = (pick) => (
+    <View key={pick.id} style={generatorStyles.pickItem}>
+      <View style={generatorStyles.pickHeader}>
+        <View style={generatorStyles.typeContainer}>
+          <View style={[
+            generatorStyles.typeBadge,
+            pick.type === 'High Confidence' ? generatorStyles.highConfidenceBadge :
+            pick.type === 'Value Play' ? generatorStyles.valueBadge :
+            generatorStyles.lockBadge
+          ]}>
+            <Text style={generatorStyles.typeText}>{pick.type}</Text>
+          </View>
+          <View style={generatorStyles.sportBadge}>
+            <Text style={generatorStyles.sportText}>{pick.sport}</Text>
+          </View>
+        </View>
+        <View style={[
+          generatorStyles.confidenceBadge,
+          pick.confidence >= 90 ? generatorStyles.confidenceHigh :
+          pick.confidence >= 85 ? generatorStyles.confidenceMedium :
+          generatorStyles.confidenceLow
+        ]}>
+          <Text style={generatorStyles.confidenceText}>{pick.confidence}%</Text>
+        </View>
+      </View>
+      
+      <Text style={generatorStyles.pickTitle}>{pick.pick}</Text>
+      
+      <View style={generatorStyles.metricsRow}>
+        <View style={generatorStyles.metricBox}>
+          <Text style={generatorStyles.metricLabel}>Win Probability</Text>
+          <Text style={generatorStyles.metricValue}>{pick.probability}</Text>
+        </View>
+        <View style={generatorStyles.metricBox}>
+          <Text style={generatorStyles.metricLabel}>Odds</Text>
+          <Text style={generatorStyles.metricValue}>{pick.odds}</Text>
+        </View>
+        <View style={generatorStyles.metricBox}>
+          <Text style={generatorStyles.metricLabel}>Expected Value</Text>
+          <Text style={[generatorStyles.metricValue, {color: '#10b981'}]}>
+            {pick.expectedValue}
+          </Text>
+        </View>
+      </View>
+      
+      <Text style={generatorStyles.analysisText}>{pick.analysis}</Text>
+      
+      <View style={generatorStyles.footerRow}>
+        <Text style={generatorStyles.keyStat}>{pick.keyStat}</Text>
+        <Text style={generatorStyles.timestamp}>{pick.timestamp}</Text>
+      </View>
+      
+      <View style={generatorStyles.trendBadge}>
+        <Ionicons name="trending-up" size={12} color="#059669" />
+        <Text style={generatorStyles.trendText}>{pick.trend}</Text>
+      </View>
+    </View>
+  );
+
+  return (
+    <View style={generatorStyles.container}>
+      <LinearGradient
+        colors={['#1e293b', '#0f172a']}
+        style={generatorStyles.gradient}
+      >
+        <View style={generatorStyles.header}>
+          <View style={generatorStyles.headerLeft}>
+            <View style={generatorStyles.iconContainer}>
+              <Ionicons name="calendar" size={20} color="#f59e0b" />
+            </View>
+            <View>
+              <Text style={generatorStyles.title}>Daily Pick Generator</Text>
+              <Text style={generatorStyles.subtitle}>3 high-probability picks for today</Text>
+            </View>
+          </View>
+          
+          <TouchableOpacity 
+            style={[
+              generatorStyles.generateButton,
+              (generatedToday || isGenerating) && generatorStyles.generateButtonDisabled
+            ]}
+            onPress={handleGenerate}
+            disabled={generatedToday || isGenerating}
+          >
+            <LinearGradient
+              colors={generatedToday ? ['#334155', '#475569'] : ['#f59e0b', '#d97706']}
+              style={generatorStyles.generateButtonGradient}
+            >
+              {isGenerating ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <>
+                  <Ionicons 
+                    name={generatedToday ? "checkmark-circle" : "add-circle"} 
+                    size={16} 
+                    color="white" 
+                  />
+                  <Text style={generatorStyles.generateButtonText}>
+                    {generatedToday ? 'Generated Today' : 'Generate Daily Picks'}
+                  </Text>
+                </>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+        
+        {generatedPicks.length > 0 ? (
+          <View style={generatorStyles.picksContainer}>
+            {generatedPicks.map(renderPickItem)}
+          </View>
+        ) : (
+          <View style={generatorStyles.emptyContainer}>
+            <Ionicons name="calendar-outline" size={40} color="#475569" />
+            <Text style={generatorStyles.emptyText}>No daily picks generated yet</Text>
+            <Text style={generatorStyles.emptySubtext}>Tap generate to create today's high-probability picks</Text>
+          </View>
+        )}
+        
+        <View style={generatorStyles.footer}>
+          <Ionicons name="shield-checkmark" size={12} color="#059669" />
+          <Text style={generatorStyles.footerText}>
+            • Updated daily at 9 AM ET • AI-powered analysis • Different from prediction models
+          </Text>
+        </View>
+      </LinearGradient>
+    </View>
+  );
+};
+
+const generatorStyles = StyleSheet.create({
+  container: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    marginHorizontal: 20,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  gradient: {
+    padding: 20,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  iconContainer: {
+    backgroundColor: '#f59e0b20',
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  subtitle: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginTop: 2,
+  },
+  generateButton: {
+    borderRadius: 15,
+    overflow: 'hidden',
+    marginLeft: 15,
+  },
+  generateButtonDisabled: {
+    opacity: 0.7,
+  },
+  generateButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 15,
+  },
+  generateButtonText: {
+    color: 'white',
+    fontSize: 13,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  picksContainer: {
+    gap: 15,
+  },
+  pickItem: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 15,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  pickHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  typeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  typeBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  highConfidenceBadge: {
+    backgroundColor: '#10b98120',
+    borderWidth: 1,
+    borderColor: '#10b98140',
+  },
+  valueBadge: {
+    backgroundColor: '#3b82f620',
+    borderWidth: 1,
+    borderColor: '#3b82f640',
+  },
+  lockBadge: {
+    backgroundColor: '#8b5cf620',
+    borderWidth: 1,
+    borderColor: '#8b5cf640',
+  },
+  typeText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#cbd5e1',
+  },
+  sportBadge: {
+    backgroundColor: '#475569',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  sportText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#e2e8f0',
+  },
+  confidenceBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  confidenceHigh: {
+    backgroundColor: '#10b981',
+  },
+  confidenceMedium: {
+    backgroundColor: '#3b82f6',
+  },
+  confidenceLow: {
+    backgroundColor: '#f59e0b',
+  },
+  confidenceText: {
+    color: 'white',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  pickTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 12,
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    backgroundColor: 'rgba(30, 41, 59, 0.8)',
+    borderRadius: 10,
+    padding: 12,
+  },
+  metricBox: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  metricLabel: {
+    fontSize: 10,
+    color: '#94a3b8',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    fontWeight: '600',
+  },
+  metricValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  analysisText: {
+    fontSize: 14,
+    color: '#cbd5e1',
+    lineHeight: 20,
+    marginBottom: 12,
+    fontStyle: 'italic',
+  },
+  footerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  keyStat: {
+    fontSize: 12,
+    color: '#059669',
+    fontWeight: '500',
+    flex: 1,
+  },
+  timestamp: {
+    fontSize: 11,
+    color: '#64748b',
+  },
+  trendBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#05966920',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  trendText: {
+    fontSize: 11,
+    color: '#059669',
+    fontWeight: '600',
+    marginLeft: 5,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    padding: 30,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#94a3b8',
+    fontWeight: '600',
+    marginTop: 15,
+  },
+  emptySubtext: {
+    fontSize: 13,
+    color: '#64748b',
+    marginTop: 5,
+  },
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 20,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+  },
+  footerText: {
+    fontSize: 11,
+    color: '#94a3b8',
+    marginLeft: 8,
+    flex: 1,
+  },
+});
 
 // Analytics Box Component
 const AnalyticsBox = () => {
@@ -602,215 +1203,6 @@ const useGenerateCounter = () => {
   };
 };
 
-// Visual Metrics Card Component
-const VisualMetricsCard = ({ stats }) => {
-  const progress = (stats.hitRate - 70) / 30; // Normalize between 70-100%
-  
-  return (
-    <View style={[visualMetricsStyles.container, {backgroundColor: '#1e293b'}]}>
-      <LinearGradient
-        colors={['#1e293b', '#0f172a']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={visualMetricsStyles.gradient}
-      >
-        <View style={visualMetricsStyles.header}>
-          <Ionicons name="analytics" size={24} color="#8b5cf6" />
-          <Text style={visualMetricsStyles.title}>AI Performance Insights</Text>
-        </View>
-        
-        {/* Progress bar for hit rate */}
-        <View style={visualMetricsStyles.progressSection}>
-          <View style={visualMetricsStyles.progressHeader}>
-            <Text style={visualMetricsStyles.progressLabel}>Hit Rate Accuracy</Text>
-            <Text style={visualMetricsStyles.progressValue}>{stats.hitRate}</Text>
-          </View>
-          <View style={visualMetricsStyles.progressBarContainer}>
-            <View style={visualMetricsStyles.progressBarBackground}>
-              <View 
-                style={[
-                  visualMetricsStyles.progressBarFill,
-                  { width: `${progress * 100}%` }
-                ]}
-              />
-            </View>
-            <View style={visualMetricsStyles.progressLabels}>
-              <Text style={visualMetricsStyles.progressMin}>70%</Text>
-              <Text style={visualMetricsStyles.progressMax}>100%</Text>
-            </View>
-          </View>
-        </View>
-        
-        <View style={visualMetricsStyles.statsGrid}>
-          <View style={visualMetricsStyles.statItem}>
-            <View style={visualMetricsStyles.statIconContainer}>
-              <Ionicons name="trending-up" size={20} color="#10b981" />
-            </View>
-            <Text style={visualMetricsStyles.statValue}>{stats.roi}</Text>
-            <Text style={visualMetricsStyles.statLabel}>ROI</Text>
-          </View>
-          
-          <View style={visualMetricsStyles.statItem}>
-            <View style={visualMetricsStyles.statIconContainer}>
-              <Ionicons name="flame" size={20} color="#f59e0b" />
-            </View>
-            <Text style={visualMetricsStyles.statValue}>{stats.streak}</Text>
-            <Text style={visualMetricsStyles.statLabel}>Streak</Text>
-          </View>
-          
-          <View style={visualMetricsStyles.statItem}>
-            <View style={visualMetricsStyles.statIconContainer}>
-              <Ionicons name="star" size={20} color="#8b5cf6" />
-            </View>
-            <Text style={visualMetricsStyles.statValue}>{stats.avgEdge}</Text>
-            <Text style={visualMetricsStyles.statLabel}>Avg Edge</Text>
-          </View>
-          
-          <View style={visualMetricsStyles.statItem}>
-            <View style={visualMetricsStyles.statIconContainer}>
-              <Ionicons name="shield-checkmark" size={20} color="#3b82f6" />
-            </View>
-            <Text style={visualMetricsStyles.statValue}>{stats.confidence}</Text>
-            <Text style={visualMetricsStyles.statLabel}>Confidence</Text>
-          </View>
-        </View>
-        
-        <View style={visualMetricsStyles.footer}>
-          <Ionicons name="information-circle" size={14} color="#64748b" />
-          <Text style={visualMetricsStyles.footerText}>
-            Powered by GPT-4 insights and real-time analytics
-          </Text>
-        </View>
-      </LinearGradient>
-    </View>
-  );
-};
-
-// Visual Metrics Styles
-const visualMetricsStyles = StyleSheet.create({
-  container: {
-    borderRadius: 20,
-    overflow: 'hidden',
-    marginBottom: 20,
-  },
-  gradient: {
-    padding: 20,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-    backgroundColor: 'transparent',
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: 'white',
-    marginLeft: 12,
-    backgroundColor: 'transparent',
-  },
-  progressSection: {
-    marginBottom: 25,
-    backgroundColor: 'transparent',
-  },
-  progressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-    backgroundColor: 'transparent',
-  },
-  progressLabel: {
-    fontSize: 14,
-    color: '#cbd5e1',
-    fontWeight: '600',
-    backgroundColor: 'transparent',
-  },
-  progressValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#8b5cf6',
-    backgroundColor: 'transparent',
-  },
-  progressBarContainer: {
-    marginBottom: 8,
-    backgroundColor: 'transparent',
-  },
-  progressBarBackground: {
-    height: 8,
-    backgroundColor: '#334155',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: '#8b5cf6',
-    borderRadius: 4,
-  },
-  progressLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: 'transparent',
-  },
-  progressMin: {
-    fontSize: 12,
-    color: '#64748b',
-    backgroundColor: 'transparent',
-  },
-  progressMax: {
-    fontSize: 12,
-    color: '#64748b',
-    backgroundColor: 'transparent',
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-    backgroundColor: 'transparent',
-  },
-  statItem: {
-    alignItems: 'center',
-    flex: 1,
-    backgroundColor: 'transparent',
-  },
-  statIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 4,
-    backgroundColor: 'transparent',
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#94a3b8',
-    backgroundColor: 'transparent',
-  },
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 15,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-    backgroundColor: 'transparent',
-  },
-  footerText: {
-    fontSize: 12,
-    color: '#94a3b8',
-    marginLeft: 8,
-    backgroundColor: 'transparent',
-  },
-});
-
 // Gradient Wrapper Component for fixing shadow warnings
 const GradientWrapper = ({ colors, style, children, gradientStyle }) => {
   const firstColor = colors?.[0] || '#8b5cf6';
@@ -827,60 +1219,264 @@ const GradientWrapper = ({ colors, style, children, gradientStyle }) => {
 };
 
 // Main Component
-export default function DailyPicksScreen() {
+export default function DailyPicksScreen({ route }) {
   const navigation = useAppNavigation();
-  const { searchHistory, addToSearchHistory } = useSearch();
+
+  const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();
+  
+  // Fix 2: Add Search Implementation
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  
   const daily = useDailyLocks();
   const generateCounter = useGenerateCounter();
   const { hasResetToday } = useDailyReset();
+  
+  // Fix 4: Add data structure states
+  const [selectedSport, setSelectedSport] = useState('NBA');
+  const [selectedTeam, setSelectedTeam] = useState('all');
+  const [filter, setFilter] = useState('all');
+  
+  // Fix 5: Add backend API states
+  const [useBackend, setUseBackend] = useState(true);
+  const [backendError, setBackendError] = useState(null);
+  const [realPlayers, setRealPlayers] = useState([]);
   
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [picks, setPicks] = useState([]);
   const [filteredPicks, setFilteredPicks] = useState([]);
-  const [selectedSport, setSelectedSport] = useState('All');
-  const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [customPrompt, setCustomPrompt] = useState('');
   const [generating, setGenerating] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showGeneratingModal, setShowGeneratingModal] = useState(false);
+  const [generatingDailyPicks, setGeneratingDailyPicks] = useState(false);
   
-  // Mock data
+  // Fix 3: Handle navigation params
+  useEffect(() => {
+    if (route.params?.initialSearch) {
+      setSearchInput(route.params.initialSearch);
+      setSearchQuery(route.params.initialSearch);
+    }
+    if (route.params?.initialSport) {
+      setSelectedSport(route.params.initialSport);
+    }
+  }, [route.params]);
+
+  // Fix 4: Update the filterSamplePlayers function
+  const filterSamplePlayers = useCallback((searchQuery = '', positionFilter = 'all', teamFilter = 'all') => {
+    const sportPlayers = samplePlayers[selectedSport] || [];
+    
+    let filteredPlayers = sportPlayers;
+    
+    // Apply position filter
+    if (positionFilter !== 'all') {
+      filteredPlayers = sportPlayers.filter(player => {
+        if (selectedSport === 'NFL' || selectedSport === 'MLB') {
+          return player.position === positionFilter;
+        } else {
+          return player.position.includes(positionFilter) || player.position.split('/').includes(positionFilter);
+        }
+      });
+    }
+    
+    // Apply team filter
+    if (teamFilter !== 'all') {
+      const team = teams[selectedSport]?.find(t => t.id === teamFilter);
+      if (team) {
+        filteredPlayers = filteredPlayers.filter(player => 
+          player.team === team.name
+        );
+      }
+    }
+    
+    // Apply search filter
+    if (searchQuery) {
+      const searchLower = searchQuery.toLowerCase().trim();
+      const searchKeywords = searchLower.split(/\s+/).filter(keyword => keyword.length > 0);
+      
+      filteredPlayers = filteredPlayers.filter(player => {
+        const playerName = player.name.toLowerCase();
+        const playerTeam = player.team.toLowerCase();
+        const playerPosition = player.position ? player.position.toLowerCase() : '';
+        
+        for (const keyword of searchKeywords) {
+          const commonWords = ['player', 'players', 'stats', 'stat', 'statistics'];
+          if (commonWords.includes(keyword)) continue;
+          
+          if (
+            playerName.includes(keyword) ||
+            playerTeam.includes(keyword) ||
+            playerPosition.includes(keyword) ||
+            playerTeam.split(' ').some(word => word.includes(keyword)) ||
+            playerName.split(' ').some(word => word.includes(keyword))
+          ) {
+            return true;
+          }
+        }
+        
+        return searchKeywords.length === 0;
+      });
+    }
+    
+    console.log(`Sample data filtered: ${filteredPlayers.length} players`);
+    return filteredPlayers;
+  }, [selectedSport]);
+
+  // Fix 5: Create loadPlayersFromBackend function
+  const loadPlayersFromBackend = useCallback(async (searchQuery = '', positionFilter = 'all') => {
+    try {
+      setLoading(true);
+      setBackendError(null);
+      
+      console.log('Fetching players from backend...');
+      
+      const filters = {};
+      if (positionFilter !== 'all') {
+        filters.position = positionFilter;
+      }
+      
+      let players = [];
+      
+      if (searchQuery) {
+        // Use search endpoint
+        const searchResults = await playerApi.searchPlayers(selectedSport, searchQuery, filters);
+        players = searchResults.players || searchResults;
+        console.log(`Backend search found ${players.length} players for "${searchQuery}"`);
+      } else {
+        // Get all players with optional position filter
+        const allPlayers = await playerApi.getPlayers(selectedSport, filters);
+        players = allPlayers.players || allPlayers;
+        console.log(`Backend returned ${players.length} players for ${selectedSport}`);
+      }
+      
+      // If no results from backend and we should fallback to sample data
+      if ((!players || players.length === 0) && process.env.EXPO_PUBLIC_FALLBACK_TO_SAMPLE === 'true') {
+        console.log('No results from backend, falling back to sample data');
+        players = filterSamplePlayers(searchQuery, positionFilter);
+      }
+      
+      setRealPlayers(players);
+      
+    } catch (error) {
+      console.error('Error loading players from backend:', error);
+      setBackendError(error.message);
+      
+      // Fallback to sample data if backend fails
+      if (process.env.EXPO_PUBLIC_FALLBACK_TO_SAMPLE === 'true') {
+        console.log('Backend failed, falling back to sample data');
+        const players = filterSamplePlayers(searchQuery, positionFilter);
+        setRealPlayers(players);
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [selectedSport, filterSamplePlayers]);
+
+  // Fix 4: Render team selector component
+  const renderTeamSelector = () => (
+    <View style={teamStyles.teamSection}>
+      <Text style={teamStyles.teamSectionTitle}>Filter by Team</Text>
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false}
+        style={teamStyles.teamSelector}
+      >
+        <TouchableOpacity
+          style={[teamStyles.teamPill, selectedTeam === 'all' && teamStyles.activeTeamPill]}
+          onPress={() => setSelectedTeam('all')}
+        >
+          <Text style={[teamStyles.teamText, selectedTeam === 'all' && teamStyles.activeTeamText]}>
+            All Teams
+          </Text>
+        </TouchableOpacity>
+        
+        {teams[selectedSport]?.map(team => (
+          <TouchableOpacity
+            key={team.id}
+            style={[teamStyles.teamPill, selectedTeam === team.id && teamStyles.activeTeamPill]}
+            onPress={() => setSelectedTeam(team.id)}
+          >
+            <Text style={[teamStyles.teamText, selectedTeam === team.id && teamStyles.activeTeamText]}>
+              {team.name.split(' ').pop()} {/* Show just last name */}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
+
+  // Mock data - Completely different from PredictionsScreen
   const mockPicks = [
     {
       id: '1',
-      player: 'Stephen Curry',
-      team: 'GSW',
+      player: 'Nikola Jokic',
+      team: 'DEN',
       sport: 'NBA',
-      pick: 'Over 31.5 Points',
-      confidence: 92,
-      odds: '-120',
-      edge: '+5.2%',
-      analysis: 'Advanced: Averaging 34.2 points (115% of prop) in last 5 games.',
-      timestamp: 'Today, 2:30 PM',
-      category: 'High Probability',
-      probability: '92%',
-      roi: '+24%',
-      units: '2.5',
+      pick: 'Triple-Double (Pts/Reb/Ast)',
+      confidence: 91,
+      odds: '+220',
+      edge: '+15.8%',
+      analysis: 'Jokic averaging 24.5/12.1/9.8 vs this opponent. Defense ranks 27th in defending centers.',
+      timestamp: 'Today, 8:30 PM ET',
+      category: 'High Confidence',
+      probability: '88%',
+      roi: '+32%',
+      units: '3.0',
       requiresPremium: false,
     },
     {
       id: '2',
-      player: 'Patrick Mahomes',
-      team: 'KC',
+      player: 'Cooper Kupp',
+      team: 'LAR',
       sport: 'NFL',
-      pick: 'Over 285.5 Passing Yards',
-      confidence: 88,
-      odds: '-110',
-      edge: '+4.8%',
-      analysis: 'Advanced: Defense allows 280.3 passing YPG (29th).',
-      timestamp: 'Today, 1:45 PM',
+      pick: 'Over 85.5 Receiving Yards',
+      confidence: 87,
+      odds: '-125',
+      edge: '+9.2%',
+      analysis: 'Kupp has averaged 98.2 YPG against NFC West opponents. Defense allows 7.9 YPA to slot receivers.',
+      timestamp: 'Tonight, 8:15 PM ET',
       category: 'Value Bet',
-      probability: '88%',
+      probability: '82%',
+      roi: '+24%',
+      units: '2.5',
+      requiresPremium: true,
+    },
+    {
+      id: '3',
+      player: 'Connor McDavid',
+      team: 'EDM',
+      sport: 'NHL',
+      pick: 'Over 1.5 Points (G+A)',
+      confidence: 85,
+      odds: '-140',
+      edge: '+7.4%',
+      analysis: 'McDavid has 24 points in last 12 games. Opponent allows 3.8 goals per game on the road.',
+      timestamp: 'Tomorrow, 7:00 PM ET',
+      category: 'Lock Pick',
+      probability: '79%',
       roi: '+18%',
       units: '2.0',
-      requiresPremium: true,
+      requiresPremium: false,
+    },
+    {
+      id: '4',
+      player: 'Juan Soto',
+      team: 'NYY',
+      sport: 'MLB',
+      pick: 'To Hit a Home Run',
+      confidence: 73,
+      odds: '+350',
+      edge: '+11.3%',
+      analysis: 'Soto batting .312 with 8 HR vs lefties. Pitcher allows 1.8 HR/9 to left-handed batters.',
+      timestamp: 'Today, 7:05 PM ET',
+      category: 'High Upside',
+      probability: '34%',
+      roi: '+45%',
+      units: '1.5',
+      requiresPremium: false,
     },
   ];
 
@@ -895,12 +1491,8 @@ export default function DailyPicksScreen() {
       setLoading(true);
       await new Promise(resolve => setTimeout(resolve, 1000));
       
-      const filtered = selectedSport === 'All' 
-        ? mockPicks 
-        : mockPicks.filter(pick => pick.sport === selectedSport);
-      
-      setPicks(filtered);
-      setFilteredPicks(filtered);
+      setPicks(mockPicks);
+      setFilteredPicks(mockPicks);
       setLoading(false);
       setRefreshing(false);
     } catch (error) {
@@ -916,9 +1508,18 @@ export default function DailyPicksScreen() {
     logAnalyticsEvent('daily_picks_refresh');
   };
 
+  // Fix 2: Update handleSearchSubmit with search history
+  const handleSearchSubmit = async () => {
+    if (searchInput.trim()) {
+      await addToSearchHistory(searchInput.trim());
+      setSearchQuery(searchInput.trim());
+      // Call your API or filter function here
+      handleSearch(searchInput.trim());
+    }
+  };
+
   const handleSearch = (query) => {
     setSearchQuery(query);
-    addToSearchHistory(query);
     
     if (!query.trim()) {
       setFilteredPicks(picks);
@@ -937,7 +1538,21 @@ export default function DailyPicksScreen() {
     logAnalyticsEvent('daily_picks_search', { query, results: filtered.length });
   };
 
-  const generatePicks = async (prompt) => {
+  // Fix 2: Update filter change handler
+  const handleFilterChange = async (newFilter) => {
+    await logAnalyticsEvent('daily_picks_filter_change', {
+      from_filter: filter,
+      to_filter: newFilter,
+      sport: selectedSport,
+    });
+    setFilter(newFilter);
+    // Clear search when changing filters for better UX
+    setSearchQuery('');
+    setSearchInput('');
+  };
+
+  // Fix 3: Handle generation logic in this screen, don't navigate
+  const generateCustomPicks = async (prompt) => {
     if (!prompt.trim()) {
       Alert.alert('Error', 'Please enter a prompt to generate picks');
       return;
@@ -955,22 +1570,22 @@ export default function DailyPicksScreen() {
       try {
         await new Promise(resolve => setTimeout(resolve, 2000));
         
-        // Simulate generated picks
+        // Generate completely different picks than PredictionsScreen
         const generatedPicks = [{
           id: `gen-${Date.now()}`,
           player: 'AI Generated',
           team: 'AI',
-          sport: 'NBA',
-          pick: 'AI Generated Prediction',
-          confidence: 85,
-          odds: '+150',
-          edge: '+3.5%',
-          analysis: 'Generated by AI based on your prompt.',
+          sport: 'Mixed',
+          pick: 'Custom AI Daily Pick',
+          confidence: 82,
+          odds: '+180',
+          edge: '+6.5%',
+          analysis: `Generated by AI based on: "${prompt}". This pick focuses on daily value opportunities.`,
           timestamp: 'Just now',
           category: 'AI Generated',
-          probability: '85%',
-          roi: '+15%',
-          units: '1.5',
+          probability: '76%',
+          roi: '+22%',
+          units: '2.0',
           generatedFrom: prompt,
           requiresPremium: false,
         }];
@@ -1006,6 +1621,47 @@ export default function DailyPicksScreen() {
     }
   };
 
+  // Fix 2: Handle picks in current screen, don't navigate
+  const handleTrackPick = (item) => {
+    console.log('Selected pick:', item);
+    
+    if (item.requiresPremium && !daily.hasAccess) {
+      Alert.alert(
+        'Premium Pick',
+        'This pick requires premium access.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Upgrade', onPress: () => navigation.goToSuccessMetrics() }
+        ]
+      );
+      return;
+    }
+    
+    logAnalyticsEvent('daily_pick_track', {
+      player: item.player,
+      pick: item.pick,
+      confidence: item.confidence,
+    });
+    Alert.alert('Tracking Started', 'Pick added to tracked picks.');
+  };
+
+  // Fix 3: Handle daily picks generation in this screen
+  const handleGenerateDailyPicks = () => {
+    setGeneratingDailyPicks(true);
+    // Do your generation logic here
+    // When done, show results in THIS screen
+    setTimeout(() => {
+      setGeneratingDailyPicks(false);
+      // Show results in current screen, don't navigate
+      Alert.alert(
+        'Daily Picks Generated!',
+        'Daily picks have been successfully generated and are now available below.',
+        [{ text: 'OK', style: 'default' }]
+      );
+      logAnalyticsEvent('daily_picks_generated');
+    }, 2000);
+  };
+
   const renderPickItem = ({ item }) => {
     const isPremiumLocked = item.requiresPremium && !daily.hasAccess;
     
@@ -1021,9 +1677,11 @@ export default function DailyPicksScreen() {
 
     const getCategoryStyle = () => {
       switch (item.category) {
-        case 'High Probability': return [styles.categoryBadgeHigh, styles.categoryTextHigh];
+        case 'High Confidence': return [styles.categoryBadgeHigh, styles.categoryTextHigh];
         case 'AI Generated': return [styles.categoryBadgeAI, styles.categoryTextAI];
         case 'Value Bet': return [styles.categoryBadgeValue, styles.categoryTextValue];
+        case 'Lock Pick': return [styles.categoryBadgeLock, styles.categoryTextLock];
+        case 'High Upside': return [styles.categoryBadgeUpside, styles.categoryTextUpside];
         default: return [styles.categoryBadgeDefault, styles.categoryTextDefault];
       }
     };
@@ -1120,29 +1778,10 @@ export default function DailyPicksScreen() {
             <Text style={styles.timestamp}>{item.timestamp}</Text>
             <TouchableOpacity 
               style={styles.trackButton}
-              onPress={() => {
-                if (isPremiumLocked) {
-                  Alert.alert(
-                    'Premium Pick',
-                    'This pick requires premium access.',
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Upgrade', onPress: () => navigation.goToSuccessMetrics() }
-                    ]
-                  );
-                  return;
-                }
-                
-                logAnalyticsEvent('daily_pick_track', {
-                  player: item.player,
-                  pick: item.pick,
-                  confidence: item.confidence,
-                });
-                Alert.alert('Tracking Started', 'Pick added to tracked picks.');
-              }}
+              onPress={() => handleTrackPick(item)}
             >
               <GradientWrapper
-                colors={['#8b5cf6', '#7c3aed']}
+                colors={['#f59e0b', '#d97706']}
                 style={styles.trackButtonGradient}
               >
                 <Ionicons name="bookmark-outline" size={16} color="white" />
@@ -1155,59 +1794,10 @@ export default function DailyPicksScreen() {
     );
   };
 
-  const renderSearchBar = () => {
-    if (!showSearch) return null;
-
-    return (
-      <>
-        <SearchBar
-          placeholder="Search daily picks by player, team, or sport..."
-          onSearch={handleSearch}
-          searchHistory={searchHistory}
-          style={styles.homeSearchBar}
-          onClose={() => {
-            setShowSearch(false);
-            setSearchQuery('');
-          }}
-        />
-        
-        {searchQuery.trim() && picks.length !== filteredPicks.length && (
-          <View style={styles.searchResultsInfo}>
-            <Text style={styles.searchResultsText}>
-              {filteredPicks.length} of {picks.length} picks match "{searchQuery}"
-            </Text>
-            <TouchableOpacity 
-              onPress={() => setSearchQuery('')}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.clearSearchText}>Clear</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </>
-    );
-  };
-
-  const sports = [
-    { id: 'All', name: 'All Sports', icon: 'grid', gradient: ['#8b5cf6', '#7c3aed'] },
-    { id: 'NBA', name: 'NBA', icon: 'basketball', gradient: ['#ef4444', '#dc2626'] },
-    { id: 'NFL', name: 'NFL', icon: 'american-football', gradient: ['#3b82f6', '#1d4ed8'] },
-    { id: 'NHL', name: 'NHL', icon: 'ice-cream', gradient: ['#1e40af', '#1e3a8a'] },
-    { id: 'MLB', name: 'MLB', icon: 'baseball', gradient: ['#10b981', '#059669'] },
-  ];
-
-  const prompts = [
-    "Generate top 3 high probability NBA player props for tonight",
-    "Show me NFL picks with over 85% confidence",
-    "Best MLB value bets with positive expected value",
-    "Create a 3-leg parlay with highest probability",
-    "Easy wins for tonight's basketball games",
-  ];
-
   if (loading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#8b5cf6" />
+        <ActivityIndicator size="large" color="#f59e0b" />
         <Text style={styles.loadingText}>Loading Daily Picks...</Text>
       </View>
     );
@@ -1215,10 +1805,10 @@ export default function DailyPicksScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header - FIXED WITH SOLID BACKGROUND WRAPPER */}
-      <View style={[styles.header, {backgroundColor: '#8b5cf6'}]}>
+      {/* Header - Updated with new color theme */}
+      <View style={[styles.header, {backgroundColor: '#f59e0b'}]}>
         <LinearGradient
-          colors={['#8b5cf6', '#7c3aed']}
+          colors={['#f59e0b', '#d97706']}
           style={[StyleSheet.absoluteFillObject, styles.headerOverlay]}
         >
           <View style={styles.headerTop}>
@@ -1246,54 +1836,10 @@ export default function DailyPicksScreen() {
             </View>
             <View style={styles.headerText}>
               <Text style={styles.headerTitle}>Daily Picks</Text>
-              <Text style={styles.headerSubtitle}>AI-curated selections updated daily</Text>
+              <Text style={styles.headerSubtitle}>High-probability selections for today</Text>
             </View>
           </View>
         </LinearGradient>
-      </View>
-
-      {/* Generate Counter */}
-      <View style={styles.counterContainer}>
-        <View style={styles.counterHeader}>
-          <Ionicons name="flash" size={20} color="#8b5cf6" />
-          <Text style={styles.counterTitle}>Daily Generation Limit</Text>
-        </View>
-        
-        <View style={styles.counterContent}>
-          {generateCounter.hasPremiumAccess ? (
-            <GradientWrapper
-              colors={['#10b981', '#059669']}
-              style={styles.premiumBadge}
-              gradientStyle={{flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: 10}}
-            >
-              <Ionicons name="infinite" size={20} color="white" />
-              <Text style={styles.premiumText}>Premium: Unlimited Generations</Text>
-            </GradientWrapper>
-          ) : (
-            <>
-              <View style={styles.counterInfo}>
-                <Text style={styles.counterLabel}>Free generations remaining:</Text>
-                <View style={styles.counterDisplay}>
-                  <Text style={styles.counterNumber}>{generateCounter.remainingGenerations}</Text>
-                  <Text style={styles.counterTotal}>/2</Text>
-                </View>
-              </View>
-              
-              <View style={styles.progressBar}>
-                <View 
-                  style={[
-                    styles.progressFill, 
-                    { width: `${(generateCounter.remainingGenerations / 2) * 100}%` }
-                  ]} 
-                />
-              </View>
-              
-              <Text style={styles.counterHint}>
-                Resets daily at midnight. Upgrade for unlimited generations.
-              </Text>
-            </>
-          )}
-        </View>
       </View>
 
       <ScrollView
@@ -1301,144 +1847,79 @@ export default function DailyPicksScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={['#8b5cf6']}
-            tintColor="#8b5cf6"
+            colors={['#f59e0b']}
+            tintColor="#f59e0b"
           />
         }
       >
-        {renderSearchBar()}
-        
-        {/* Sport Selector */}
-        <View style={styles.sportSelector}>
-          {sports.map((sport) => (
-            <TouchableOpacity
-              key={sport.id}
-              style={[
-                styles.sportButton,
-                selectedSport === sport.id && styles.sportButtonActive,
-              ]}
-              onPress={() => {
-                setSelectedSport(sport.id);
-                logAnalyticsEvent('daily_picks_sport_filter', { sport: sport.id });
-              }}
-            >
-              {selectedSport === sport.id ? (
-                <GradientWrapper
-                  colors={sport.gradient}
-                  style={styles.sportButtonGradient}
-                  gradientStyle={{flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: 15}}
-                >
-                  <Ionicons name={sport.icon} size={20} color="#fff" />
-                  <Text style={styles.sportButtonTextActive}>{sport.name}</Text>
-                </GradientWrapper>
-              ) : (
-                <>
-                  <Ionicons name={sport.icon} size={20} color="#6b7280" />
-                  <Text style={styles.sportButtonText}>{sport.name}</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          ))}
-        </View>
+        {/* Informative Text Box */}
+        <InformativeTextBox />
 
-        {/* Visual Metrics Card */}
-        <VisualMetricsCard 
-          stats={{
-            hitRate: '87.3%',
-            roi: '+24.8%',
-            streak: '15-3',
-            avgEdge: '4.2⭐',
-            confidence: '92%'
-          }} 
+        {/* Daily Pick Generator */}
+        <DailyPickGenerator 
+          onGenerate={handleGenerateDailyPicks}
+          isGenerating={generatingDailyPicks}
         />
 
-        {/* Generate Picks Section */}
-        <View style={styles.promptsSection}>
-          <View style={styles.promptsHeader}>
-            <GradientWrapper
-              colors={['#8b5cf6', '#7c3aed']}
-              style={styles.promptsTitleGradient}
-              gradientStyle={{paddingHorizontal: 20, paddingVertical: 12, borderRadius: 15, alignItems: 'center'}}
-            >
-              <Text style={styles.promptsTitle}>🚀 Generate Daily Picks</Text>
-            </GradientWrapper>
-            <Text style={styles.promptsSubtitle}>
-              {hasResetToday ? '🎯 Fresh picks for a new day!' : 'Use AI to generate custom picks'}
-            </Text>
-          </View>
-          
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            style={styles.promptsScroll}
-          >
-            {prompts.map((prompt, index) => (
-              <TouchableOpacity
-                key={index}
-                style={styles.promptChip}
-                onPress={() => generatePicks(prompt)}
-                disabled={generating}
-              >
-                <GradientWrapper
-                  colors={['#8b5cf6', '#7c3aed']}
-                  style={[styles.promptChipGradient, generating && styles.promptChipDisabled]}
-                  gradientStyle={{flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 20, minWidth: 220}}
-                >
-                  <Ionicons name="sparkles" size={14} color="#fff" />
-                  <Text style={styles.promptChipText}>{prompt}</Text>
-                </GradientWrapper>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-          
-          <View style={styles.customPromptContainer}>
-            <View style={styles.promptInputContainer}>
-              <Ionicons name="create" size={20} color="#8b5cf6" />
+        {showSearch && (
+          <>
+            {/* Fix 2: Updated Search Bar Implementation */}
+            <View style={[styles.searchContainer, { marginHorizontal: 16, marginTop: 20 }]}>
               <TextInput
-                style={styles.promptInput}
-                placeholder="Or type your own prompt (e.g., 'NBA parlay for tonight')"
+                value={searchInput}
+                onChangeText={setSearchInput}
+                onSubmitEditing={handleSearchSubmit}
+                placeholder="Search daily picks by player, team, or sport..."
+                style={styles.searchInput}
                 placeholderTextColor="#94a3b8"
-                value={customPrompt}
-                onChangeText={setCustomPrompt}
-                multiline
-                numberOfLines={2}
-                editable={!generating}
               />
+              <TouchableOpacity onPress={handleSearchSubmit} style={styles.searchButton}>
+                <Ionicons name="search" size={20} color="#000" />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              style={[styles.generateButton, (!customPrompt.trim() || generating) && styles.generateButtonDisabled]}
-              onPress={() => customPrompt.trim() && generatePicks(customPrompt)}
-              disabled={!customPrompt.trim() || generating}
-            >
-              <GradientWrapper
-                colors={['#8b5cf6', '#7c3aed']}
-                style={styles.generateButtonGradient}
-                gradientStyle={{flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 15, borderRadius: 15}}
-              >
-                {generating ? (
-                  <ActivityIndicator size="small" color="white" />
-                ) : (
-                  <>
-                    <Ionicons name="rocket" size={16} color="white" />
-                    <Text style={styles.generateButtonText}>Generate</Text>
-                  </>
-                )}
-              </GradientWrapper>
-            </TouchableOpacity>
-          </View>
-          
-          <View style={styles.promptsFooter}>
-            <Ionicons name="information-circle" size={14} color="#8b5cf6" />
-            <Text style={styles.promptsFooterText}>
-              Uses advanced AI to analyze trends and generate high probability picks
+            
+            {/* Fix 4: Debug display */}
+            <View style={{paddingHorizontal: 16, marginBottom: 8}}>
+              <Text style={{color: 'white', fontSize: 12}}>
+                DEBUG: Filter = "{filter}", Search = "{searchQuery}"
+              </Text>
+            </View>
+            
+            {/* Fix 4: Team Selector */}
+            {renderTeamSelector()}
+            
+            {searchQuery.trim() && picks.length !== filteredPicks.length && (
+              <View style={styles.searchResultsInfo}>
+                <Text style={styles.searchResultsText}>
+                  {filteredPicks.length} of {picks.length} picks match "{searchQuery}"
+                </Text>
+                <TouchableOpacity 
+                  onPress={() => {
+                    setSearchQuery('');
+                    setSearchInput('');
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.clearSearchText}>Clear</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </>
+        )}
+
+        {/* Fix 5: Error display */}
+        {backendError && (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>
+              Backend Error: {backendError}. Using sample data.
             </Text>
           </View>
-        </View>
+        )}
 
-        {/* Today's Picks */}
+        {/* Today's Picks Section */}
         <View style={styles.picksSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>🎯 Today's Daily Picks</Text>
+            <Text style={styles.sectionTitle}>🎯 Today's Top Picks</Text>
             <View style={styles.pickCountBadge}>
               <Text style={styles.pickCount}>
                 {filteredPicks.length} picks • {generateCounter.remainingGenerations} free gens
@@ -1456,34 +1937,18 @@ export default function DailyPicksScreen() {
             />
           ) : (
             <View style={styles.emptyContainer}>
-              <Ionicons name="search-outline" size={48} color="#8b5cf6" />
+              <Ionicons name="search-outline" size={48} color="#f59e0b" />
               {searchQuery.trim() ? (
                 <>
                   <Text style={styles.emptyText}>No picks found</Text>
-                  <Text style={styles.emptySubtext}>Try a different search term or sport</Text>
+                  <Text style={styles.emptySubtext}>Try a different search term</Text>
                 </>
               ) : (
                 <>
                   <Text style={styles.emptyText}>No picks available</Text>
-                  <Text style={styles.emptySubtext}>Generate some picks above!</Text>
+                  <Text style={styles.emptySubtext}>Check back soon for new picks</Text>
                 </>
               )}
-              <TouchableOpacity 
-                style={styles.generateEmptyButton}
-                onPress={() => generatePicks('Generate daily picks for me')}
-                disabled={generating}
-              >
-                <GradientWrapper
-                  colors={['#8b5cf6', '#7c3aed']}
-                  style={styles.generateEmptyButtonGradient}
-                  gradientStyle={{flexDirection: 'row', alignItems: 'center', paddingHorizontal: 25, paddingVertical: 14, borderRadius: 15}}
-                >
-                  <Ionicons name="sparkles" size={16} color="white" />
-                  <Text style={styles.generateEmptyButtonText}>
-                    {generating ? 'Generating...' : 'Generate Picks'}
-                  </Text>
-                </GradientWrapper>
-              </TouchableOpacity>
             </View>
           )}
         </View>
@@ -1498,9 +1963,9 @@ export default function DailyPicksScreen() {
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalOverlay}>
-            <View style={[styles.upgradeModalContent, {backgroundColor: '#8b5cf6'}]}>
+            <View style={[styles.upgradeModalContent, {backgroundColor: '#f59e0b'}]}>
               <LinearGradient
-                colors={['#8b5cf6', '#7c3aed']}
+                colors={['#f59e0b', '#d97706']}
                 style={StyleSheet.absoluteFillObject}
               >
                 <View style={styles.upgradeModalHeader}>
@@ -1549,7 +2014,7 @@ export default function DailyPicksScreen() {
                       }}
                     >
                       <GradientWrapper
-                        colors={['#8b5cf6', '#7c3aed']}
+                        colors={['#f59e0b', '#d97706']}
                         style={styles.upgradeOptionGradient}
                         gradientStyle={{padding: 20, borderRadius: 15, alignItems: 'center'}}
                       >
@@ -1585,7 +2050,7 @@ export default function DailyPicksScreen() {
             <View style={styles.modalContent}>
               {generating ? (
                 <>
-                  <ActivityIndicator size="large" color="#8b5cf6" />
+                  <ActivityIndicator size="large" color="#f59e0b" />
                   <Text style={styles.modalTitle}>Generating AI Picks...</Text>
                   <Text style={styles.modalText}>Analyzing data and finding high probability picks</Text>
                 </>
@@ -1602,7 +2067,7 @@ export default function DailyPicksScreen() {
                     }
                   </Text>
                   <TouchableOpacity
-                    style={styles.modalButton}
+                    style={[styles.modalButton, {backgroundColor: '#f59e0b'}]}
                     onPress={() => setShowGeneratingModal(false)}
                   >
                     <Text style={styles.modalButtonText}>View Results</Text>
@@ -1616,7 +2081,7 @@ export default function DailyPicksScreen() {
       
       {!showSearch && (
         <TouchableOpacity
-          style={[styles.floatingSearchButton, {backgroundColor: '#8b5cf6'}]}
+          style={[styles.floatingSearchButton, {backgroundColor: '#f59e0b'}]}
           onPress={() => {
             setShowSearch(true);
             logAnalyticsEvent('daily_picks_search_toggle');
@@ -1624,7 +2089,7 @@ export default function DailyPicksScreen() {
           activeOpacity={0.7}
         >
           <LinearGradient
-            colors={['#8b5cf6', '#7c3aed']}
+            colors={['#f59e0b', '#d97706']}
             style={styles.floatingSearchContent}
           >
             <Ionicons name="search" size={24} color="white" />
@@ -1636,6 +2101,44 @@ export default function DailyPicksScreen() {
     </View>
   );
 }
+
+// Fix 4: Team styles
+const teamStyles = StyleSheet.create({
+  teamSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#1e293b',
+    marginBottom: 16,
+  },
+  teamSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#94a3b8',
+    marginBottom: 8,
+  },
+  teamSelector: {
+    height: 40,
+  },
+  teamPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#334155',
+    marginRight: 8,
+  },
+  activeTeamPill: {
+    backgroundColor: '#3b82f6',
+  },
+  teamText: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  activeTeamText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+});
 
 const styles = StyleSheet.create({
   // Updated bold styles with solid backgrounds to fix shadow warnings
@@ -1659,6 +2162,39 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   
+  // Fix 2: Search container styles
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#000',
+  },
+  searchButton: {
+    padding: 8,
+  },
+  
+  // Fix 5: Error styles
+  errorContainer: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    margin: 16,
+  },
+  errorText: {
+    color: '#dc2626',
+    fontSize: 12,
+  },
+  
   // Header styles
   header: {
     paddingHorizontal: 16,
@@ -1671,11 +2207,6 @@ const styles = StyleSheet.create({
   
   headerOverlay: {
     flex: 1,
-    backgroundColor: 'transparent',
-  },
-  
-  headerContent: {
-    marginBottom: 10,
     backgroundColor: 'transparent',
   },
   
@@ -1745,148 +2276,130 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
 
-  // Navigation menu styles
-  navigationMenuContainer: {
-    marginTop: 16,
-    backgroundColor: 'rgba(30, 41, 59, 0.9)',
-    borderRadius: 20,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+  // Search bar styles
+  homeSearchBar: {
+    marginHorizontal: 16,
+    marginTop: 20,
+    marginBottom: 8,
   },
   
-  navigationMenu: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    backgroundColor: 'transparent',
-  },
-  
-  navButton: {
-    alignItems: 'center',
-    flex: 1,
-    marginHorizontal: 4,
-    backgroundColor: 'transparent',
-  },
-  
-  navButtonGradient: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 15,
-    alignItems: 'center',
-    width: '100%',
-  },
-  
-  navButtonText: {
-    color: 'white',
-    fontSize: 11,
-    marginTop: 4,
-    fontWeight: 'bold',
-    backgroundColor: 'transparent',
-  },
-
-  // Counter styles
-  counterContainer: {
-    backgroundColor: '#1e293b',
-    borderRadius: 15,
-    padding: 16,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  
-  counterHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-    backgroundColor: 'transparent',
-  },
-  
-  counterTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#f1f5f9',
-    marginLeft: 10,
-    backgroundColor: 'transparent',
-  },
-  
-  counterContent: {
-    backgroundColor: '#0f172a',
-    borderRadius: 12,
-    padding: 16,
-  },
-  
-  premiumBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  
-  premiumText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 15,
-    marginLeft: 10,
-    backgroundColor: 'transparent',
-  },
-  
-  counterInfo: {
+  searchResultsInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
-    backgroundColor: 'transparent',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#1e293b',
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
   },
   
-  counterLabel: {
+  searchResultsText: {
     fontSize: 14,
     color: '#cbd5e1',
-    fontWeight: '600',
+    fontWeight: '500',
     backgroundColor: 'transparent',
   },
   
-  counterDisplay: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    backgroundColor: 'transparent',
-  },
-  
-  counterNumber: {
-    fontSize: 32,
+  clearSearchText: {
+    fontSize: 14,
+    color: '#f59e0b',
     fontWeight: 'bold',
-    color: '#8b5cf6',
     backgroundColor: 'transparent',
   },
   
-  counterTotal: {
-    fontSize: 18,
-    color: '#64748b',
-    marginLeft: 4,
-    backgroundColor: 'transparent',
-  },
-  
-  progressBar: {
-    height: 6,
-    backgroundColor: '#334155',
-    borderRadius: 3,
-    marginBottom: 8,
+  floatingSearchButton: {
+    position: 'absolute',
+    bottom: 30,
+    right: 20,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    zIndex: 1000,
     overflow: 'hidden',
   },
   
-  progressFill: {
+  floatingSearchContent: {
+    width: '100%',
     height: '100%',
-    backgroundColor: '#8b5cf6',
-    borderRadius: 3,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  // Modal styles
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
   },
   
-  counterHint: {
-    fontSize: 12,
-    color: '#94a3b8',
+  modalOverlay: {
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 25,
+    padding: 30,
+    alignItems: 'center',
+    width: '85%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#0f172a',
+    marginTop: 20,
     textAlign: 'center',
-    fontStyle: 'italic',
+    backgroundColor: 'transparent',
+  },
+  
+  modalText: {
+    fontSize: 15,
+    color: '#475569',
+    marginTop: 10,
+    textAlign: 'center',
+    lineHeight: 22,
+    backgroundColor: 'transparent',
+  },
+  
+  successIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  
+  modalButton: {
+    backgroundColor: '#f59e0b',
+    paddingHorizontal: 30,
+    paddingVertical: 14,
+    borderRadius: 15,
+    marginTop: 25,
+  },
+  
+  modalButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
     backgroundColor: 'transparent',
   },
 
@@ -2003,383 +2516,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
 
-  // Search bar styles
-  homeSearchBar: {
-    marginHorizontal: 16,
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  
-  searchResultsInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#1e293b',
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
-  },
-  
-  searchResultsText: {
-    fontSize: 14,
-    color: '#cbd5e1',
-    fontWeight: '500',
-    backgroundColor: 'transparent',
-  },
-  
-  clearSearchText: {
-    fontSize: 14,
-    color: '#8b5cf6',
-    fontWeight: 'bold',
-    backgroundColor: 'transparent',
-  },
-  
-  floatingSearchButton: {
-    position: 'absolute',
-    bottom: 30,
-    right: 20,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    zIndex: 1000,
-    overflow: 'hidden',
-  },
-  
-  floatingSearchContent: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  // Modal styles
-  modalContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-  },
-  
-  modalOverlay: {
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  
-  modalContent: {
-    backgroundColor: 'white',
-    borderRadius: 25,
-    padding: 30,
-    alignItems: 'center',
-    width: '85%',
-    maxWidth: 400,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 10,
-  },
-  
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#0f172a',
-    marginTop: 20,
-    textAlign: 'center',
-    backgroundColor: 'transparent',
-  },
-  
-  modalSubtitle: {
-    fontSize: 16,
-    color: '#8b5cf6',
-    marginTop: 8,
-    textAlign: 'center',
-    fontWeight: '500',
-    backgroundColor: 'transparent',
-  },
-  
-  modalText: {
-    fontSize: 15,
-    color: '#475569',
-    marginTop: 10,
-    textAlign: 'center',
-    lineHeight: 22,
-    backgroundColor: 'transparent',
-  },
-  
-  successIconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  
-  modalButton: {
-    backgroundColor: '#8b5cf6',
-    paddingHorizontal: 30,
-    paddingVertical: 14,
-    borderRadius: 15,
-    marginTop: 25,
-  },
-  
-  modalButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 16,
-    backgroundColor: 'transparent',
-  },
-
-  // Processing steps
-  processingSteps: {
-    marginTop: 25,
-    marginBottom: 15,
-    backgroundColor: 'transparent',
-  },
-
-  stepIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-  },
-
-  stepDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#e2e8f0',
-  },
-
-  stepLine: {
-    width: 25,
-    height: 3,
-    backgroundColor: '#e2e8f0',
-  },
-
-  stepActive: {
-    backgroundColor: '#8b5cf6',
-  },
-
-  // Sport Selector
-  sportSelector: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    margin: 20,
-    backgroundColor: '#1e293b',
-    borderRadius: 20,
-    padding: 10,
-  },
-  
-  sportButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    borderRadius: 15,
-    marginHorizontal: 5,
-    flex: 1,
-    justifyContent: 'center',
-    backgroundColor: '#0f172a',
-  },
-  
-  sportButtonActive: {
-    backgroundColor: 'transparent',
-  },
-  
-  sportButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    borderRadius: 15,
-    width: '100%',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  
-  sportButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#94a3b8',
-    marginLeft: 8,
-    backgroundColor: 'transparent',
-  },
-  
-  sportButtonTextActive: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: 'white',
-    marginLeft: 8,
-    backgroundColor: 'transparent',
-  },
-
-  // Prompts section
-  promptsSection: {
-    marginHorizontal: 20,
-    marginBottom: 25,
-    padding: 20,
-    borderRadius: 20,
-    backgroundColor: '#1e293b',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  
-  promptsHeader: {
-    marginBottom: 20,
-    backgroundColor: 'transparent',
-  },
-  
-  promptsTitleGradient: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 15,
-    marginBottom: 10,
-    overflow: 'hidden',
-  },
-  
-  promptsTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: 'white',
-    textAlign: 'center',
-    backgroundColor: 'transparent',
-  },
-  
-  promptsSubtitle: {
-    fontSize: 14,
-    color: '#cbd5e1',
-    fontWeight: '500',
-    textAlign: 'center',
-    backgroundColor: 'transparent',
-  },
-  
-  promptsStats: {
-    backgroundColor: '#f3e8ff',
-    padding: 12,
-    borderRadius: 12,
-  },
-  
-  promptsScroll: {
-    marginVertical: 15,
-    backgroundColor: 'transparent',
-  },
-  
-  promptChip: {
-    marginRight: 15,
-    borderRadius: 20,
-    backgroundColor: 'transparent',
-  },
-  
-  promptChipGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 20,
-    minWidth: 220,
-    overflow: 'hidden',
-  },
-
-  promptChipDisabled: {
-    opacity: 0.6,
-  },
-  
-  promptChipText: {
-    fontSize: 13,
-    color: 'white',
-    fontWeight: '600',
-    marginLeft: 8,
-    flex: 1,
-    backgroundColor: 'transparent',
-  },
-  
-  customPromptContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 20,
-    backgroundColor: 'transparent',
-  },
-  
-  promptInputContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#0f172a',
-    borderWidth: 1,
-    borderColor: '#334155',
-    borderRadius: 15,
-    paddingHorizontal: 15,
-    paddingVertical: 14,
-    marginRight: 15,
-  },
-  
-  promptInput: {
-    flex: 1,
-    fontSize: 15,
-    color: '#f1f5f9',
-    marginLeft: 10,
-    maxHeight: 60,
-    fontWeight: '500',
-    backgroundColor: 'transparent',
-  },
-  
-  generateButton: {
-    borderRadius: 15,
-    minWidth: 140,
-    backgroundColor: 'transparent',
-  },
-  
-  generateButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 15,
-    borderRadius: 15,
-    overflow: 'hidden',
-  },
-  
-  generateButtonDisabled: {
-    opacity: 0.7,
-  },
-  
-  generateButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 15,
-    marginLeft: 8,
-    backgroundColor: 'transparent',
-  },
-  
-  promptsFooter: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginTop: 20,
-    paddingTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-    backgroundColor: 'transparent',
-  },
-  
-  promptsFooterText: {
-    fontSize: 13,
-    color: '#cbd5e1',
-    flex: 1,
-    marginLeft: 10,
-    lineHeight: 18,
-    fontWeight: '500',
-    backgroundColor: 'transparent',
-  },
-
   // Sport badge styles
   sportBadge: {
     marginLeft: 10,
@@ -2450,9 +2586,19 @@ const styles = StyleSheet.create({
     borderColor: '#8b5cf640',
   },
   categoryBadgeValue: {
+    backgroundColor: '#3b82f620',
+    borderWidth: 1,
+    borderColor: '#3b82f640',
+  },
+  categoryBadgeLock: {
     backgroundColor: '#f59e0b20',
     borderWidth: 1,
     borderColor: '#f59e0b40',
+  },
+  categoryBadgeUpside: {
+    backgroundColor: '#8b5cf620',
+    borderWidth: 1,
+    borderColor: '#8b5cf640',
   },
   categoryBadgeDefault: {
     backgroundColor: '#6b728020',
@@ -2471,7 +2617,13 @@ const styles = StyleSheet.create({
     color: '#8b5cf6',
   },
   categoryTextValue: {
+    color: '#3b82f6',
+  },
+  categoryTextLock: {
     color: '#f59e0b',
+  },
+  categoryTextUpside: {
+    color: '#8b5cf6',
   },
   categoryTextDefault: {
     color: '#6b7280',
@@ -2513,17 +2665,19 @@ const styles = StyleSheet.create({
   pickCard: {
     borderRadius: 20,
     marginBottom: 16,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#1e293b',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    borderWidth: 1,
+    borderColor: '#334155',
   },
   
   pickCardContent: {
     padding: 20,
-    backgroundColor: '#ffffff',
+    backgroundColor: 'transparent',
     borderRadius: 20,
   },
 
@@ -2585,7 +2739,7 @@ const styles = StyleSheet.create({
   playerName: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#0f172a',
+    color: '#f1f5f9',
     backgroundColor: 'transparent',
   },
   
@@ -2598,7 +2752,7 @@ const styles = StyleSheet.create({
   
   teamText: {
     fontSize: 16,
-    color: '#475569',
+    color: '#cbd5e1',
     fontWeight: '500',
     backgroundColor: 'transparent',
   },
@@ -2616,13 +2770,13 @@ const styles = StyleSheet.create({
   pickValue: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#0f766e',
+    color: '#f59e0b',
     marginBottom: 8,
     backgroundColor: 'transparent',
   },
   
   premiumLockedText: {
-    color: '#6b7280',
+    color: '#94a3b8',
     opacity: 0.7,
     backgroundColor: 'transparent',
   },
@@ -2642,7 +2796,7 @@ const styles = StyleSheet.create({
   
   oddsLabel: {
     fontSize: 15,
-    color: '#475569',
+    color: '#94a3b8',
     marginRight: 6,
     fontWeight: '500',
     backgroundColor: 'transparent',
@@ -2650,7 +2804,7 @@ const styles = StyleSheet.create({
   
   oddsText: {
     fontSize: 16,
-    color: '#0f172a',
+    color: '#f1f5f9',
     fontWeight: 'bold',
     backgroundColor: 'transparent',
   },
@@ -2658,7 +2812,7 @@ const styles = StyleSheet.create({
   edgeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f0fdf4',
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 10,
@@ -2677,12 +2831,12 @@ const styles = StyleSheet.create({
   probabilityMetrics: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    backgroundColor: '#f8fafc',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     padding: 16,
     borderRadius: 12,
     marginBottom: 15,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: '#334155',
   },
   
   metricItem: {
@@ -2693,7 +2847,7 @@ const styles = StyleSheet.create({
   
   metricLabel: {
     fontSize: 12,
-    color: '#64748b',
+    color: '#94a3b8',
     marginTop: 6,
     fontWeight: '500',
     backgroundColor: 'transparent',
@@ -2702,7 +2856,7 @@ const styles = StyleSheet.create({
   metricValue: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#0f172a',
+    color: '#f1f5f9',
     marginTop: 3,
     backgroundColor: 'transparent',
   },
@@ -2710,7 +2864,7 @@ const styles = StyleSheet.create({
   analysisContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#fffbeb',
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
     padding: 15,
     borderRadius: 12,
     marginBottom: 15,
@@ -2720,7 +2874,7 @@ const styles = StyleSheet.create({
   
   analysisText: {
     fontSize: 15,
-    color: '#92400e',
+    color: '#cbd5e1',
     flex: 1,
     marginLeft: 10,
     lineHeight: 22,
@@ -2731,7 +2885,7 @@ const styles = StyleSheet.create({
   generatedInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f5f3ff',
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
     padding: 12,
     borderRadius: 10,
     marginBottom: 15,
@@ -2741,7 +2895,7 @@ const styles = StyleSheet.create({
   
   generatedText: {
     fontSize: 12,
-    color: '#5b21b6',
+    color: '#c4b5fd',
     flex: 1,
     marginLeft: 8,
     fontStyle: 'italic',
@@ -2789,7 +2943,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 40,
     borderRadius: 20,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#1e293b',
     borderWidth: 2,
     borderColor: '#334155',
   },
@@ -2797,40 +2951,17 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#0f172a',
+    color: '#f1f5f9',
     marginTop: 20,
     backgroundColor: 'transparent',
   },
   
   emptySubtext: {
     fontSize: 16,
-    color: '#475569',
+    color: '#94a3b8',
     marginTop: 8,
     textAlign: 'center',
     fontWeight: '500',
-    backgroundColor: 'transparent',
-  },
-  
-  generateEmptyButton: {
-    borderRadius: 15,
-    marginTop: 25,
-    backgroundColor: 'transparent',
-  },
-  
-  generateEmptyButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 25,
-    paddingVertical: 14,
-    borderRadius: 15,
-    overflow: 'hidden',
-  },
-  
-  generateEmptyButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 15,
-    marginLeft: 8,
     backgroundColor: 'transparent',
   },
 });

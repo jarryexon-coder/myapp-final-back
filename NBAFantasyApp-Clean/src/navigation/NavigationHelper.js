@@ -1,4 +1,4 @@
-// src/navigation/NavigationHelper.js - UPDATED WITH SAFETY CHECKS
+// src/navigation/NavigationHelper.js - UPDATED WITH NEW SCREENS
 import { useNavigation, CommonActions } from '@react-navigation/native';
 
 // SAFE NAVIGATION HELPER - prevents errors if navigation isn't ready
@@ -8,7 +8,6 @@ const createSafeNavigation = (navigation) => {
     return {
       navigate: () => console.warn('Navigation not available'),
       goBack: () => console.warn('Cannot go back - no navigation'),
-      // Add other methods as needed
     };
   }
 
@@ -25,6 +24,7 @@ const createSafeNavigation = (navigation) => {
     goToAIGenerators: () => navigation.navigate('AIGenerators'),
     goToEliteTools: () => navigation.navigate('EliteTools'),
     goToSubscriptionTab: () => navigation.navigate('Subscription'),
+    goToLoginTab: () => navigation.navigate('Login'),
     
     // ====== ALL ACCESS STACK NAVIGATION ======
     goToAllAccessHub: () => navigation.navigate('AllAccess', { 
@@ -101,6 +101,27 @@ const createSafeNavigation = (navigation) => {
       screen: 'SecretPhrases',
       params 
     }),
+    // NEW: PrizePicks Generator navigation
+    goToPrizePicksGenerator: (params) => navigation.navigate('EliteTools', { 
+      screen: 'PrizePicksGenerator',
+      params 
+    }),
+    
+    // ====== LOGIN NAVIGATION ======
+    goToLoginScreen: () => navigation.navigate('Login', { 
+      screen: 'Login' 
+    }),
+    
+    // ====== LOGOUT FUNCTIONALITY ======
+    logout: () => {
+      // Add your logout logic here (clear tokens, reset state, etc.)
+      console.log('Logging out...');
+      // After logout, navigate to login
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }],
+      });
+    },
     
     // ====== ALIASES FOR BACKWARD COMPATIBILITY ======
     goToNHL: (params) => navigation.navigate('SuperStats', { 
@@ -185,7 +206,7 @@ export const useAppNavigation = () => {
   return createSafeNavigation(navigation);
 };
 
-// Screen names constants (updated to match actual navigator)
+// Screen names constants (updated with new screens)
 export const SCREENS = {
   // Main tabs
   HOME: 'Home',
@@ -194,6 +215,7 @@ export const SCREENS = {
   AI_GENERATORS: 'AIGenerators',
   ELITE_TOOLS: 'EliteTools',
   SUBSCRIPTION: 'Subscription',
+  LOGIN: 'Login',
   
   // All Access Stack screens
   ALL_ACCESS_HUB: 'AllAccessHub',
@@ -220,6 +242,10 @@ export const SCREENS = {
   ELITE_TOOLS_HUB: 'EliteToolsHub',
   KALSHI_PREDICTIONS: 'KalshiPredictions',
   SECRET_PHRASES: 'SecretPhrases',
+  PRIZE_PICKS_GENERATOR: 'PrizePicksGenerator', // NEW
+  
+  // Auth Stack screens
+  LOGIN_SCREEN: 'Login',
 };
 
 // Safe helper functions with error handling
@@ -241,6 +267,14 @@ export const navigateToScreenInTab = (navigation, tabName, screenName, params = 
 
 export const navigateToKalshiPredictions = (navigation, params) => {
   navigateToScreenInTab(navigation, 'EliteTools', 'KalshiPredictions', params);
+};
+
+export const navigateToPrizePicksGenerator = (navigation, params) => {
+  navigateToScreenInTab(navigation, 'EliteTools', 'PrizePicksGenerator', params);
+};
+
+export const navigateToLogin = (navigation, params) => {
+  navigateToScreenInTab(navigation, 'Login', 'Login', params);
 };
 
 export const navigateToAnalytics = (navigation, params) => {

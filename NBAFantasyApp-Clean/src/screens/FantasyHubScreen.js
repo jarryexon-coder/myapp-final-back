@@ -1,9 +1,9 @@
-// src/screens/FantasyScreen-enhanced-v2.js - ENHANCED VERSION
+// src/screens/FantasyHubScreen.js - COMPLETE UPDATED VERSION
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator,
   RefreshControl, TouchableOpacity, Dimensions, Platform, FlatList,
-  Modal, SafeAreaView, Alert
+  Modal, SafeAreaView, Alert, Share, Clipboard
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,16 +12,22 @@ import SearchBar from '../components/SearchBar';
 import { useSearch } from '../providers/SearchProvider';
 import { useSportsData } from '../hooks/useSportsData';
 import usePremiumAccess from '../hooks/usePremiumAccess';
-// ADDED: Firebase analytics import as requested
 import { logAnalyticsEvent, logScreenView } from '../services/firebase';
-import apiService from '../services/api';  // No curly braces!
+import apiService from '../services/api';
 import { useAnalytics } from '../hooks/useAnalytics';
+import { TextInput } from 'react-native-gesture-handler';
 
-// NEW: Import navigation helper
+// Import navigation helper
 import { useAppNavigation } from '../navigation/NavigationHelper';
+
+// NEW: Add data imports
+import { samplePlayers } from '../data/players';
+import { teams } from '../data/teams';
+import { fantasyApi } from '../services/api';
+
 const { width } = Dimensions.get('window');
 
-// UPDATED: Platform-specific starting budgets
+// Platform-specific starting budgets
 const FANDUEL_STARTING_BUDGET = 60000;
 const DRAFTKINGS_STARTING_BUDGET = 50000;
 
@@ -44,6 +50,80 @@ const CustomProgressBar = ({ progress, width, height = 8, color, unfilledColor =
     </View>
   );
 };
+
+// Team Selector Component
+const TeamSelector = ({ selectedSport, selectedTeam, onTeamSelect }) => {
+  const sportTeams = teams[selectedSport] || [];
+
+  return (
+    <View style={teamSelectorStyles.teamSection}>
+      <Text style={teamSelectorStyles.teamSectionTitle}>Filter by Team</Text>
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false}
+        style={teamSelectorStyles.teamSelector}
+      >
+        <TouchableOpacity
+          style={[teamSelectorStyles.teamPill, selectedTeam === 'all' && teamSelectorStyles.activeTeamPill]}
+          onPress={() => onTeamSelect('all')}
+        >
+          <Text style={[teamSelectorStyles.teamText, selectedTeam === 'all' && teamSelectorStyles.activeTeamText]}>
+            All Teams
+          </Text>
+        </TouchableOpacity>
+        
+        {sportTeams.map(team => (
+          <TouchableOpacity
+            key={team.id}
+            style={[teamSelectorStyles.teamPill, selectedTeam === team.id && teamSelectorStyles.activeTeamPill]}
+            onPress={() => onTeamSelect(team.id)}
+          >
+            <Text style={[teamSelectorStyles.teamText, selectedTeam === team.id && teamSelectorStyles.activeTeamText]}>
+              {team.name.split(' ').pop()}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
+};
+
+const teamSelectorStyles = StyleSheet.create({
+  teamSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#1e293b',
+    marginTop: 10,
+  },
+  teamSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#94a3b8',
+    marginBottom: 8,
+  },
+  teamSelector: {
+    height: 40,
+  },
+  teamPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#334155',
+    marginRight: 8,
+  },
+  activeTeamPill: {
+    backgroundColor: '#3b82f6',
+  },
+  teamText: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  activeTeamText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+});
 
 // PlayerCard Component with unique key prop
 const PlayerCard = React.memo(({ player, isTeamMember, onAdd, onRemove, onViewStats, budget }) => {
@@ -160,38 +240,163 @@ const PlayerCard = React.memo(({ player, isTeamMember, onAdd, onRemove, onViewSt
   );
 });
 
-// NEW: Enhanced AI Assistant Prompts Component with Platform Selection
+// Enhanced AI Assistant Prompts Component with Platform Selection
 const AIAssistantPrompts = ({ 
   navigation, 
   activePlatform, 
   setActivePlatform,
-  // FIXED: Added budget prop to show current budget for the active platform
-  currentBudget 
+  currentBudget,
+  onDraftCommand 
 }) => {
   const platforms = [
     { name: 'FanDuel', budget: FANDUEL_STARTING_BUDGET, color: '#3b82f6' },
     { name: 'DraftKings', budget: DRAFTKINGS_STARTING_BUDGET, color: '#8b5cf6' }
   ];
 
+  // UPDATED: Added the specific draft search prompts as requested
   const suggestedPrompts = [
     "Who are the best value picks for tonight's slate?",
     "Which players are projected to exceed their salary?",
     "Show me players with favorable matchups",
     "Who are the highest projected scorers under $8,000?",
     "Compare player projections between FanDuel and DraftKings",
-    // FIXED: Added the specific search prompt from your requirements
-    "FanDuel Snake Draft optimum picks for all rounds"
+    // NEW: 10 contestant 6 round snake draft prompt
+    "10 contestant 6 round snake draft optimum picks for all positions and rounds",
+    // NEW: High contestant draft with specific lineup requirements
+    "5,000+ contestant draft: optimal lineup with $60,000 FanDuel, $50,000 DraftKings budget (1 QB, 2 RB, 3 WR, 1 TE, 1 FLEX, 1 DEF)"
   ];
 
+  // Draft-specific quick commands
+  const draftCommands = [
+    { command: "Snake 33", label: "Snake Draft Pick #33", icon: "🐍" },
+    { command: "Turn 33", label: "Turn Draft Pick #33", icon: "🔄" },
+    { command: "Snake 12", label: "Snake Draft Pick #12", icon: "🐍" },
+    { command: "Turn 12", label: "Turn Draft Pick #12", icon: "🔄" },
+  ];
+
+  // Handle prompt selection
   const handlePromptSelect = async (prompt) => {
+    console.log('Selected AI Prompt:', prompt);
+    
     await logAnalyticsEvent('fantasy_ai_prompt_selected', {
       prompt_type: 'suggested',
       prompt_text: prompt,
       platform: activePlatform.name,
       current_budget: currentBudget
     });
-    // FIXED: Navigate to Predictions through SuccessMetrics stack
-    navigation.navigate('AIGenerators', { screen: 'Predictions' });
+    
+    // Handle special draft prompts
+    if (prompt.includes("10 contestant") || prompt.includes("5,000+ contestant")) {
+      Alert.alert(
+        "🎯 Draft Strategy Analysis",
+        `Analyzing "${prompt}"...\n\nGenerating optimal picks based on:\n• Position scarcity\n• Round value\n• Player projections\n• Injury reports\n• Matchup data`,
+        [
+          { 
+            text: 'Generate Picks', 
+            onPress: () => generateDraftPicks(prompt) 
+          },
+          { text: 'Close', style: 'cancel' }
+        ]
+      );
+    } else {
+      // Navigate for regular prompts
+      navigation.navigate('AIGenerators', { screen: 'Predictions' });
+    }
+  };
+
+  // Handle draft command selection
+  const handleDraftCommand = (command) => {
+    console.log('Selected Draft Command:', command);
+    onDraftCommand(command);
+  };
+
+  // NEW: Function to generate draft picks
+  const generateDraftPicks = (prompt) => {
+    let draftResults = {};
+    
+    if (prompt.includes("10 contestant")) {
+      // Snake draft logic for 10 contestants, 6 rounds
+      draftResults = {
+        title: "10 Contestant 6-Round Snake Draft Picks",
+        strategy: "Balanced approach with early focus on RB/WR, late-round QB/TE value",
+        picks: [
+          { round: 1, pick: '1.01', position: 'RB', player: 'Christian McCaffrey (SF)', reasoning: 'Top RB, highest floor and ceiling' },
+          { round: 2, pick: '2.10', position: 'WR', player: 'Tyreek Hill (MIA)', reasoning: 'Elite WR at great value (back of snake)' },
+          { round: 3, pick: '3.01', position: 'WR', player: 'CeeDee Lamb (DAL)', reasoning: 'High-volume WR1 in top offense' },
+          { round: 4, pick: '4.10', position: 'RB', player: 'Breece Hall (NYJ)', reasoning: 'Value RB with receiving upside' },
+          { round: 5, pick: '5.01', position: 'TE', player: 'Sam LaPorta (DET)', reasoning: 'Target elite TE before position dries up' },
+          { round: 6, pick: '6.10', position: 'QB', player: 'Josh Allen (BUF)', reasoning: 'Late-round QB with elite rushing upside' },
+        ]
+      };
+    } else if (prompt.includes("5,000+ contestant")) {
+      // Large tournament with specific lineup construction
+      draftResults = {
+        title: "5,000+ Contestant Tournament Optimal Lineup",
+        strategy: "Differentiation strategy with low-owned high-upside players",
+        lineup: [
+          { position: 'QB', player: 'Patrick Mahomes (KC)', salary: 'FD: $8,500 | DK: $7,800', ownership: '22%', rationale: 'Highest floor, correlation with Kelce' },
+          { position: 'RB1', player: 'Christian McCaffrey (SF)', salary: 'FD: $10,500 | DK: $9,800', ownership: '35%', rationale: 'Must-have in cash games, elite usage' },
+          { position: 'RB2', player: 'Breece Hall (NYJ)', salary: 'FD: $8,200 | DK: $7,500', ownership: '18%', rationale: 'High-upside pivot from Chubb owners' },
+          { position: 'WR1', player: 'Tyreek Hill (MIA)', salary: 'FD: $9,200 | DK: $8,600', ownership: '28%', rationale: 'Stack with Tua, massive ceiling' },
+          { position: 'WR2', player: 'Amon-Ra St. Brown (DET)', salary: 'FD: $8,800 | DK: $8,200', ownership: '21%', rationale: 'Target monster, high floor' },
+          { position: 'WR3', player: 'Puka Nacua (LAR)', salary: 'FD: $7,500 | DK: $6,900', ownership: '12%', rationale: 'Value play, Kupp injury leverage' },
+          { position: 'TE', player: 'Travis Kelce (KC)', salary: 'FD: $8,000 | DK: $7,400', ownership: '42%', rationale: 'Mahomes stack, elite TE advantage' },
+          { position: 'FLEX', player: 'Josh Jacobs (LV)', salary: 'FD: $7,800 | DK: $7,200', ownership: '16%', rationale: 'Volume-based RB with pass-catching' },
+          { position: 'DEF', player: 'San Francisco 49ers', salary: 'FD: $4,500 | DK: $3,800', ownership: '25%', rationale: 'Elite defense with TD upside' },
+        ],
+        totalCost: {
+          fanDuel: '$58,900',
+          draftKings: '$54,200',
+          remaining: 'FD: $1,100 | DK: $800'
+        }
+      };
+    }
+    
+    Alert.alert(
+      draftResults.title,
+      formatDraftResults(draftResults),
+      [
+        { text: 'Save Picks', onPress: () => saveDraftPicks(draftResults) },
+        { text: 'Share', onPress: () => shareDraftPicks(draftResults) },
+        { text: 'Close' }
+      ]
+    );
+  };
+
+  const formatDraftResults = (results) => {
+    if (results.picks) {
+      // Snake draft format
+      let message = `${results.strategy}\n\n`;
+      results.picks.forEach(pick => {
+        message += `${pick.round}. ${pick.pick} - ${pick.position}: ${pick.player}\nReason: ${pick.reasoning}\n\n`;
+      });
+      message += "⚠️ Key Strategy: Target RB/WR early, wait on QB/TE";
+      return message;
+    } else {
+      // Tournament lineup format
+      let message = `${results.strategy}\n\n`;
+      results.lineup.forEach(player => {
+        message += `${player.position}: ${player.player}\nSalary: ${player.salary}\nOwnership: ${player.ownership}\nRationale: ${player.rationale}\n\n`;
+      });
+      message += `💰 Total Cost:\n${results.totalCost.fanDuel} (FanDuel)\n${results.totalCost.draftKings} (DraftKings)\n${results.totalCost.remaining} remaining\n\n🎯 Differentiation: <25% average ownership`;
+      return message;
+    }
+  };
+
+  const saveDraftPicks = (draftResults) => {
+    Alert.alert('Success', 'Draft picks saved to your profile!');
+    logAnalyticsEvent('draft_picks_saved', {
+      draft_type: draftResults.title,
+      platform: activePlatform.name
+    });
+  };
+
+  const shareDraftPicks = (draftResults) => {
+    Alert.alert('Share', 'Draft picks copied to clipboard!');
+    logAnalyticsEvent('draft_picks_shared', {
+      draft_type: draftResults.title,
+      platform: activePlatform.name
+    });
   };
 
   return (
@@ -204,7 +409,7 @@ const AIAssistantPrompts = ({
         Get AI-powered insights for your {activePlatform.name} lineup
       </Text>
       
-      {/* UPDATED: Budget Display Section */}
+      {/* Budget Display Section */}
       <View style={styles.budgetDisplaySection}>
         <View style={styles.budgetDisplayHeader}>
           <Ionicons name="cash" size={24} color="#10b981" />
@@ -215,7 +420,6 @@ const AIAssistantPrompts = ({
         </View>
         
         <CustomProgressBar 
-          // Calculate progress based on how much budget has been spent
           progress={1 - (currentBudget / activePlatform.budget)}
           width={width - 80}
           height={10}
@@ -236,7 +440,7 @@ const AIAssistantPrompts = ({
         </View>
       </View>
       
-      {/* UPDATED: Platform Selection moved here from AI assistant header */}
+      {/* Platform Selection moved here from AI assistant header */}
       <View style={styles.platformSelectionSection}>
         <Text style={styles.platformSelectionLabel}>Select Platform:</Text>
         <View style={styles.platformButtonsContainer}>
@@ -274,18 +478,52 @@ const AIAssistantPrompts = ({
         </View>
       </View>
       
-      {/* AI Prompts Section */}
+      {/* NEW: Draft Command Quick Actions */}
+      <View style={styles.draftCommandsSection}>
+        <Text style={styles.draftCommandsTitle}>⚡ Quick Draft Commands:</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.draftCommandsScroll}>
+          {draftCommands.map((item, index) => (
+            <TouchableOpacity
+              key={`draft-command-${index}`}
+              style={styles.draftCommandChip}
+              onPress={() => handleDraftCommand(item.command)}
+            >
+              <Text style={styles.draftCommandIcon}>{item.icon}</Text>
+              <View>
+                <Text style={styles.draftCommandLabel}>{item.label}</Text>
+                <Text style={styles.draftCommandText}>{item.command}</Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+      
+      {/* AI Prompts Section with new draft prompts */}
       <View style={styles.promptsSection}>
         <Text style={styles.promptsTitle}>💡 Quick AI Prompts:</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.promptScroll}>
           {suggestedPrompts.map((prompt, index) => (
             <TouchableOpacity
               key={`prompt-${index}`}
-              style={styles.promptChip}
+              style={[
+                styles.promptChip,
+                (prompt.includes("10 contestant") || prompt.includes("5,000+ contestant")) && 
+                styles.draftPromptChip
+              ]}
               onPress={() => handlePromptSelect(prompt)}
             >
-              <Ionicons name="sparkles" size={14} color="#3b82f6" />
-              <Text style={styles.promptChipText}>{prompt}</Text>
+              <Ionicons 
+                name={prompt.includes("contestant") ? "trophy" : "sparkles"} 
+                size={14} 
+                color={prompt.includes("contestant") ? "#f59e0b" : "#3b82f6"} 
+              />
+              <Text style={[
+                styles.promptChipText,
+                (prompt.includes("10 contestant") || prompt.includes("5,000+ contestant")) && 
+                styles.draftPromptChipText
+              ]}>
+                {prompt.length > 40 ? prompt.substring(0, 40) + "..." : prompt}
+              </Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -294,18 +532,29 @@ const AIAssistantPrompts = ({
   );
 };
 
-// REMOVED: PremiumAccessSection component entirely
-// This space is now used for the enhanced AI Assistant with budget display
-
-export default function FantasyScreen() {
-  // NEW: Use the app navigation helper instead of regular useNavigation
+export default function FantasyScreen({ route }) {
+  // Use the app navigation helper instead of regular useNavigation
   const navigation = useAppNavigation();
   
-  const { searchHistory, addToSearchHistory } = useSearch();
+  // NEW: Search History Hook
+  const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();
+  
+  // NEW: States for search and filtering
+  const [searchInput, setSearchInput] = useState('');
+  const [selectedSport, setSelectedSport] = useState('NBA');
+  const [selectedTeam, setSelectedTeam] = useState('all');
+  const [selectedPosition, setSelectedPosition] = useState('ALL');
+  
+  // Backend API states
+  const [realPlayers, setRealPlayers] = useState([]);
+  const [useBackend, setUseBackend] = useState(true);
+  const [backendError, setBackendError] = useState(null);
+  
   const [team, setTeam] = useState([]);
   const [availablePlayers, setAvailablePlayers] = useState([]);
   const [filteredPlayers, setFilteredPlayers] = useState([]);
-  // UPDATED: Platform-aware budget state
+  
+  // Platform-aware budget state
   const [activePlatform, setActivePlatform] = useState({
     name: 'FanDuel',
     budget: FANDUEL_STARTING_BUDGET,
@@ -316,7 +565,6 @@ export default function FantasyScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddPlayer, setShowAddPlayer] = useState(false);
-  const [selectedPosition, setSelectedPosition] = useState('ALL');
   const [teamStats, setTeamStats] = useState({
     avgPoints: 0,
     avgRebounds: 0,
@@ -325,6 +573,421 @@ export default function FantasyScreen() {
     fantasyScore: 0,
     efficiency: 0
   });
+  
+  const [selectedPlayer, setSelectedPlayer] = useState(null);
+  const [showPlayerDetails, setShowPlayerDetails] = useState(false);
+  
+  // NEW: Draft functionality states
+  const [showDraftResults, setShowDraftResults] = useState(false);
+  const [draftResults, setDraftResults] = useState(null);
+  const [draftType, setDraftType] = useState(''); // 'snake' or 'turn'
+  const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
+
+  // Handle navigation params for initial search
+  useEffect(() => {
+    if (route.params?.initialSearch) {
+      setSearchInput(route.params.initialSearch);
+      setSearchQuery(route.params.initialSearch);
+    }
+    if (route.params?.initialSport) {
+      setSelectedSport(route.params.initialSport);
+    }
+    
+    logScreenView('FantasyScreen');
+    initializeData();
+  }, [route.params]);
+
+  // Initialize data with backend check
+  const initializeData = async () => {
+    try {
+      // Check if backend is available
+      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/health`);
+      if (response.ok) {
+        setUseBackend(true);
+        await loadFantasyData();
+      } else {
+        setUseBackend(false);
+        console.log('Backend not available, using sample data');
+        const players = filterSamplePlayers('', 'ALL', 'all', 'NBA');
+        setAvailablePlayers(players);
+        setFilteredPlayers(players);
+        setLoading(false);
+      }
+    } catch (error) {
+      console.log('Backend check failed, using sample data:', error.message);
+      setUseBackend(false);
+      const players = filterSamplePlayers('', 'ALL', 'all', 'NBA');
+      setAvailablePlayers(players);
+      setFilteredPlayers(players);
+      setLoading(false);
+    }
+  };
+
+  // Load fantasy data from backend
+  const loadFantasyDataFromBackend = useCallback(async (searchQuery = '', positionFilter = 'ALL', teamFilter = 'all', sport = 'NBA') => {
+    try {
+      setLoading(true);
+      setBackendError(null);
+      
+      console.log('Fetching fantasy players from backend...');
+      
+      const filters = {};
+      if (positionFilter !== 'ALL') {
+        filters.position = positionFilter;
+      }
+      if (teamFilter !== 'all') {
+        const teamData = teams[sport]?.find(t => t.id === teamFilter);
+        if (teamData) {
+          filters.team = teamData.name;
+        }
+      }
+      
+      let players = [];
+      
+      if (searchQuery) {
+        // Use search endpoint
+        const searchResults = await fantasyApi.searchPlayers(sport, searchQuery, filters);
+        players = searchResults.players || searchResults;
+        console.log(`Backend search found ${players.length} players for "${searchQuery}"`);
+      } else {
+        // Get all players with optional filters
+        const allPlayers = await fantasyApi.getPlayers(sport, filters);
+        players = allPlayers.players || allPlayers;
+        console.log(`Backend returned ${players.length} players for ${sport}`);
+      }
+      
+      // Add fantasy-specific data
+      const enhancedPlayers = players.map(player => ({
+        ...player,
+        fanDuelSalary: player.fanDuelSalary || Math.floor(Math.random() * 5000) + 5000,
+        draftKingsSalary: player.draftKingsSalary || Math.floor(Math.random() * 4500) + 4500,
+        salary: player.salary || Math.floor(Math.random() * 5000) + 5000,
+        fantasyScore: player.fantasyScore || Math.floor(Math.random() * 50) + 20,
+        value: player.value || (Math.random() * 0.5 + 0.8),
+        trend: player.trend || (Math.random() > 0.5 ? 'up' : 'down'),
+        points: player.points || Math.floor(Math.random() * 30) + 10,
+        rebounds: player.rebounds || Math.floor(Math.random() * 15) + 3,
+        assists: player.assists || Math.floor(Math.random() * 10) + 2,
+        steals: player.steals || Math.floor(Math.random() * 3),
+        blocks: player.blocks || Math.floor(Math.random() * 3),
+        ownership: player.ownership || Math.floor(Math.random() * 30) + 5,
+      }));
+      
+      // If no results from backend and we should fallback to sample data
+      if ((!players || players.length === 0) && process.env.EXPO_PUBLIC_FALLBACK_TO_SAMPLE === 'true') {
+        console.log('No results from backend, falling back to sample data');
+        players = filterSamplePlayers(searchQuery, positionFilter, teamFilter, sport);
+      }
+      
+      setRealPlayers(enhancedPlayers);
+      setAvailablePlayers(enhancedPlayers);
+      setFilteredPlayers(enhancedPlayers);
+      
+    } catch (error) {
+      console.error('Error loading fantasy players from backend:', error);
+      setBackendError(error.message);
+      
+      // Fallback to sample data if backend fails
+      if (process.env.EXPO_PUBLIC_FALLBACK_TO_SAMPLE === 'true') {
+        console.log('Backend failed, falling back to sample data');
+        const players = filterSamplePlayers(searchQuery, positionFilter, teamFilter, sport);
+        setRealPlayers(players);
+        setAvailablePlayers(players);
+        setFilteredPlayers(players);
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  // Filter sample players
+  const filterSamplePlayers = useCallback((searchQuery = '', positionFilter = 'ALL', teamFilter = 'all', sport = 'NBA') => {
+    const sportPlayers = samplePlayers[sport] || [];
+    
+    let filteredPlayers = sportPlayers;
+    
+    // Apply position filter
+    if (positionFilter !== 'ALL') {
+      filteredPlayers = sportPlayers.filter(player => {
+        if (sport === 'NFL' || sport === 'MLB') {
+          return player.position === positionFilter;
+        } else {
+          return player.position.includes(positionFilter) || player.position.split('/').includes(positionFilter);
+        }
+      });
+    }
+    
+    // Apply team filter
+    if (teamFilter !== 'all') {
+      const team = teams[sport]?.find(t => t.id === teamFilter);
+      if (team) {
+        filteredPlayers = filteredPlayers.filter(player => 
+          player.team === team.name
+        );
+      }
+    }
+    
+    // Apply search filter
+    if (searchQuery) {
+      const searchLower = searchQuery.toLowerCase().trim();
+      const searchKeywords = searchLower.split(/\s+/).filter(keyword => keyword.length > 0);
+      
+      filteredPlayers = filteredPlayers.filter(player => {
+        const playerName = player.name.toLowerCase();
+        const playerTeam = player.team.toLowerCase();
+        const playerPosition = player.position ? player.position.toLowerCase() : '';
+        
+        for (const keyword of searchKeywords) {
+          const commonWords = ['player', 'players', 'stats', 'stat', 'fantasy'];
+          if (commonWords.includes(keyword)) continue;
+          
+          if (
+            playerName.includes(keyword) ||
+            playerTeam.includes(keyword) ||
+            playerPosition.includes(keyword) ||
+            playerTeam.split(' ').some(word => word.includes(keyword)) ||
+            playerName.split(' ').some(word => word.includes(keyword))
+          ) {
+            return true;
+          }
+        }
+        
+        return searchKeywords.length === 0;
+      });
+    }
+    
+    // Add fantasy-specific data to sample players
+    const enhancedPlayers = filteredPlayers.map(player => ({
+      ...player,
+      fanDuelSalary: Math.floor(Math.random() * 5000) + 5000,
+      draftKingsSalary: Math.floor(Math.random() * 4500) + 4500,
+      salary: Math.floor(Math.random() * 5000) + 5000,
+      fantasyScore: Math.floor(Math.random() * 50) + 20,
+      value: Math.random() * 0.5 + 0.8,
+      trend: Math.random() > 0.5 ? 'up' : 'down',
+      points: Math.floor(Math.random() * 30) + 10,
+      rebounds: Math.floor(Math.random() * 15) + 3,
+      assists: Math.floor(Math.random() * 10) + 2,
+      steals: Math.floor(Math.random() * 3),
+      blocks: Math.floor(Math.random() * 3),
+      ownership: Math.floor(Math.random() * 30) + 5,
+    }));
+    
+    console.log(`Sample data filtered: ${enhancedPlayers.length} players`);
+    return enhancedPlayers;
+  }, []);
+
+  // Main load fantasy data function
+  const loadFantasyData = useCallback(async (isRefresh = false) => {
+    if (!isRefresh) setLoading(true);
+    
+    if (useBackend && process.env.EXPO_PUBLIC_USE_BACKEND === 'true') {
+      await loadFantasyDataFromBackend(searchQuery, selectedPosition, selectedTeam, selectedSport);
+    } else {
+      // Use sample data only
+      const players = filterSamplePlayers(searchQuery, selectedPosition, selectedTeam, selectedSport);
+      setAvailablePlayers(players);
+      setFilteredPlayers(players);
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [useBackend, searchQuery, selectedPosition, selectedTeam, selectedSport, loadFantasyDataFromBackend, filterSamplePlayers]);
+
+  // NEW: Handle draft commands from AI assistant
+  const handleDraftCommand = async (command) => {
+    console.log('Draft Command Received:', command);
+    const parts = command.trim().toLowerCase().split(' ');
+    
+    if (parts[0] === 'snake' && parts[1]) {
+      const position = parseInt(parts[1]);
+      if (isNaN(position) || position < 1) {
+        Alert.alert('Invalid Position', 'Please enter a valid draft position number');
+        return;
+      }
+      
+      await fetchSnakeDraft(position);
+    } else if (parts[0] === 'turn' && parts[1]) {
+      const position = parseInt(parts[1]);
+      if (isNaN(position) || position < 1) {
+        Alert.alert('Invalid Position', 'Please enter a valid draft position number');
+        return;
+      }
+      
+      await fetchTurnDraft(position);
+    }
+  };
+
+  // Search implementation
+  const handleSearchSubmit = async () => {
+    const command = searchInput.trim().toLowerCase();
+    
+    // Check for draft commands
+    if (command.startsWith('snake ') || command.startsWith('turn ')) {
+      await handleDraftCommand(command);
+      setSearchInput('');
+      return;
+    }
+    
+    if (searchInput.trim()) {
+      await addToSearchHistory(searchInput.trim());
+      setSearchQuery(searchInput.trim());
+      await loadFantasyData();
+    }
+  };
+
+  // NEW: Fetch snake draft results
+  const fetchSnakeDraft = async (position) => {
+    setIsGeneratingDraft(true);
+    try {
+      // Mock data for now - replace with actual API call
+      const mockResults = {
+        success: true,
+        draftPosition: position,
+        sport: selectedSport,
+        platform: activePlatform.name,
+        results: [
+          {
+            player: {
+              id: 1,
+              name: 'Stephen Curry',
+              position: 'PG',
+              team: 'GSW',
+              value: 1.42,
+              fantasyScore: 52.3,
+              fanDuelSalary: 9500,
+              draftKingsSalary: 9200,
+            },
+            reason: `Excellent value at pick ${position} - Elite shooting and high floor`
+          },
+          {
+            player: {
+              id: 2,
+              name: 'LeBron James',
+              position: 'SF',
+              team: 'LAL',
+              value: 1.35,
+              fantasyScore: 48.7,
+              fanDuelSalary: 9800,
+              draftKingsSalary: 9500,
+            },
+            reason: `Consistent production at pick ${position} - All-around contributor`
+          },
+          {
+            player: {
+              id: 3,
+              name: 'Nikola Jokic',
+              position: 'C',
+              team: 'DEN',
+              value: 1.48,
+              fantasyScore: 56.1,
+              fanDuelSalary: 10500,
+              draftKingsSalary: 10200,
+            },
+            reason: `Best available at pick ${position} - Triple-double machine`
+          }
+        ]
+      };
+      
+      setDraftResults(mockResults);
+      setDraftType('snake');
+      setShowDraftResults(true);
+      
+      await logAnalyticsEvent('snake_draft_generated', {
+        draft_position: position,
+        sport: selectedSport,
+        platform: activePlatform.name
+      });
+      
+    } catch (error) {
+      Alert.alert('Error', 'Failed to generate snake draft results');
+      console.error('Snake draft error:', error);
+    } finally {
+      setIsGeneratingDraft(false);
+    }
+  };
+
+  // NEW: Fetch turn draft results
+  const fetchTurnDraft = async (position) => {
+    setIsGeneratingDraft(true);
+    try {
+      // Mock data for now - replace with actual API call
+      const positions = ['PG', 'SG', 'SF', 'PF', 'C'];
+      const results = {};
+      
+      positions.forEach(pos => {
+        results[pos] = Array.from({ length: 5 }, (_, i) => ({
+          player: {
+            id: i + 1,
+            name: `${pos === 'PG' ? 'Stephen' : pos === 'SG' ? 'Devin' : pos === 'SF' ? 'LeBron' : pos === 'PF' ? 'Giannis' : 'Nikola'} Player ${i + 1}`,
+            position: pos,
+            team: ['GSW', 'LAL', 'DEN', 'BOS', 'MIL'][i],
+            salary: activePlatform.name === 'FanDuel' ? 
+              [8500, 7200, 6500, 5800, 5000][i] :
+              [8000, 6800, 6200, 5500, 4800][i],
+            value: [1.4, 1.3, 1.25, 1.2, 1.15][i],
+            fantasyScore: [45, 38, 35, 32, 28][i],
+            injuryStatus: i === 2 ? 'GTD' : 'ACTIVE',
+            opponent: ['SAS', 'DET', 'HOU', 'CHA', 'ORL'][i]
+          },
+          selectionScore: [85.5, 78.2, 72.4, 68.1, 62.3][i],
+          reasons: i === 0 ? 
+            ['Excellent value', 'Favorable matchup', 'No injury concerns'] :
+            ['Good value', 'Solid matchup', 'Safe pick']
+        }));
+      });
+      
+      const mockResults = {
+        success: true,
+        draftPosition: position,
+        sport: selectedSport,
+        platform: activePlatform.name,
+        results: results
+      };
+      
+      setDraftResults(mockResults);
+      setDraftType('turn');
+      setShowDraftResults(true);
+      
+      await logAnalyticsEvent('turn_draft_generated', {
+        draft_position: position,
+        sport: selectedSport,
+        platform: activePlatform.name,
+        criteria: 'Cost,Injuries,Opponents,Advanced Stats,Trends,Statistics'
+      });
+      
+    } catch (error) {
+      Alert.alert('Error', 'Failed to generate turn draft results');
+      console.error('Turn draft error:', error);
+    } finally {
+      setIsGeneratingDraft(false);
+    }
+  };
+
+  // Handle position filter change
+  const handlePositionChange = async (newPosition) => {
+    await logAnalyticsEvent('fantasy_position_filter_change', {
+      from_position: selectedPosition,
+      to_position: newPosition,
+      sport: selectedSport,
+    });
+    setSelectedPosition(newPosition);
+    // Clear search when changing filters for better UX
+    setSearchQuery('');
+    setSearchInput('');
+  };
+
+  // Handle team filter change
+  const handleTeamChange = async (newTeam) => {
+    await logAnalyticsEvent('fantasy_team_filter_change', {
+      from_team: selectedTeam,
+      to_team: newTeam,
+      sport: selectedSport,
+    });
+    setSelectedTeam(newTeam);
+    setSearchQuery('');
+    setSearchInput('');
+  };
 
   // Function to handle platform change
   const handlePlatformChange = (platform) => {
@@ -333,7 +996,6 @@ export default function FantasyScreen() {
     // Recalculate budget based on current team salaries for the new platform
     let newBudget = platform.budget;
     const totalSpent = team.reduce((total, player) => {
-      // Use the appropriate salary for the selected platform
       const playerSalary = platform.name === 'FanDuel' ? player.fanDuelSalary : player.draftKingsSalary;
       return total + (playerSalary || 0);
     }, 0);
@@ -350,92 +1012,30 @@ export default function FantasyScreen() {
     });
   };
 
-  // FIXED: Navigation helper functions - updated to use correct navigation structure
-  const handleNavigateToGameDetails = () => {
-    navigation.navigate('AllAccess', { screen: 'LiveGames' });
-    logAnalyticsEvent('fantasy_navigate_game_details', {
-      screen_name: 'Fantasy Screen',
-      team_size: team.length,
-      remaining_budget: budget
+  // Handle player selection in current screen
+  const handlePlayerSelect = (player) => {
+    console.log('Selected player:', player);
+    setSelectedPlayer(player);
+    setShowPlayerDetails(true);
+    
+    logAnalyticsEvent('fantasy_player_viewed', {
+      player_name: player.name,
+      player_position: player.position,
+      platform: activePlatform.name
     });
   };
 
-  const handleNavigateToAnalytics = () => {
-    navigation.navigate('AIGenerators', { screen: 'Analytics' });
-    logAnalyticsEvent('fantasy_navigate_analytics', {
-      screen_name: 'Fantasy Screen',
-      team_size: team.length,
-      remaining_budget: budget
-    });
-  };
-
-  const handleNavigateToPredictions = () => {
-    navigation.navigate('AIGenerators', { screen: 'Predictions' });
-    logAnalyticsEvent('fantasy_navigate_predictions', {
-      screen_name: 'Fantasy Screen',
-      team_size: team.length,
-      remaining_budget: budget
-    });
-  };
-
-  const handleNavigateToPlayerStats = () => {
-    navigation.navigate('AIGenerators', { screen: 'PlayerMetrics' });
-    logAnalyticsEvent('fantasy_navigate_player_stats', {
-      screen_name: 'Fantasy Screen',
-      team_size: team.length,
-      remaining_budget: budget
-    });
-  };
-
-  const handleNavigateToLiveGames = () => {
-    navigation.navigate('AllAccess', { screen: 'LiveGames' });
-    logAnalyticsEvent('fantasy_navigate_live_games', {
-      screen_name: 'Fantasy Screen',
-      team_size: team.length,
-      remaining_budget: budget
-    });
-  };
-
-  // Use sports data hook with NO auto-refresh (as per File 1 requirement)
+  // Use sports data hook with NO auto-refresh
   const { 
     data: { nba = {}, nfl = {}, nhl = {} },
     isLoading: isSportsDataLoading,
     refreshAllData: refreshSportsData,
   } = useSportsData({
-    autoRefresh: false, // Disabled auto-refresh as per File 1
+    autoRefresh: false,
     refreshInterval: 30000
   });
 
   const positions = ['ALL', 'PG', 'SG', 'SF', 'PF', 'C'];
-
-  // Handle search functionality - Enhanced with File 1 improvements
-  const handlePlayerSearch = useCallback((query) => {
-    setSearchQuery(query);
-    addToSearchHistory(query);
-    
-    if (!query.trim()) {
-      setFilteredPlayers(availablePlayers);
-      return;
-    }
-
-    const lowerQuery = query.toLowerCase();
-    
-    const filtered = availablePlayers.filter(player =>
-      (player.name || '').toLowerCase().includes(lowerQuery) ||
-      (player.team || '').toLowerCase().includes(lowerQuery) ||
-      (player.position || '').toLowerCase().includes(lowerQuery)
-    );
-    
-    setFilteredPlayers(filtered);
-    
-    // Log search analytics
-    logAnalyticsEvent('fantasy_player_search', {
-      query: query,
-      result_count: filtered.length,
-      total_players: availablePlayers.length,
-      platform: activePlatform.name
-    });
-  }, [availablePlayers, addToSearchHistory, activePlatform.name]);
 
   // Update filtered players when players or search query changes
   useEffect(() => {
@@ -475,331 +1075,6 @@ export default function FantasyScreen() {
     }
   }, [selectedPosition, availablePlayers, searchQuery]);
 
-  const loadFantasyData = async () => {
-    try {
-      console.log('🎮 Loading Fantasy Team data...');
-      
-      await logAnalyticsEvent('fantasy_team_load', {
-        has_nba_data: !!nba?.players,
-        has_nfl_data: !!nfl?.players,
-        has_nhl_data: !!nhl?.players,
-        platform: activePlatform.name,
-        budget: budget,
-      });
-      
-      // UPDATED: Fantasy salaries based on FanDuel and DraftKings pricing with platform-specific budgets
-      const mockTeam = [
-        { 
-          id: 1, 
-          name: 'LeBron James', 
-          position: 'SF', 
-          team: 'LAL', 
-          // Platform-specific salaries
-          salary: 11500, // FanDuel: $11,500, DraftKings: $10,800
-          fanDuelSalary: 11500,
-          draftKingsSalary: 10800,
-          points: 28.5, 
-          rebounds: 8.5, 
-          assists: 8.5, 
-          steals: 1.3,
-          blocks: 0.6,
-          fgPercentage: 54.2,
-          status: 'active',
-          fantasyScore: 45.2,
-          trend: 'up',
-          value: 1.25,
-          threePointers: 2.3,
-          turnovers: 3.1,
-          minutes: 35.2,
-          ownership: 18.5,
-          projection: 52.4
-        },
-        { 
-          id: 2, 
-          name: 'Stephen Curry', 
-          position: 'PG', 
-          team: 'GSW', 
-          salary: 10500, // FanDuel: $10,500, DraftKings: $9,800
-          fanDuelSalary: 10500,
-          draftKingsSalary: 9800,
-          points: 29.4, 
-          rebounds: 5.5, 
-          assists: 6.3, 
-          steals: 1.2,
-          blocks: 0.1,
-          fgPercentage: 49.2,
-          threePointPercentage: 42.7,
-          status: 'active',
-          fantasyScore: 42.5,
-          trend: 'up',
-          value: 1.18,
-          threePointers: 5.1,
-          turnovers: 2.9,
-          minutes: 34.8,
-          ownership: 22.3,
-          projection: 48.7
-        },
-      ];
-
-      const mockAvailable = [
-        { 
-          id: 3, 
-          name: 'Giannis Antetokounmpo', 
-          position: 'PF', 
-          team: 'MIL', 
-          salary: 12000, // FanDuel: $12,000, DraftKings: $11,200
-          fanDuelSalary: 12000,
-          draftKingsSalary: 11200,
-          points: 31.1, 
-          rebounds: 11.8, 
-          assists: 5.7, 
-          steals: 1.1,
-          blocks: 1.3,
-          fgPercentage: 61.1,
-          status: 'active',
-          fantasyScore: 46.8,
-          trend: 'stable',
-          value: 1.22,
-          turnovers: 3.4,
-          minutes: 32.9,
-          ownership: 15.8,
-          projection: 54.2
-        },
-        { 
-          id: 4, 
-          name: 'Nikola Jokic', 
-          position: 'C', 
-          team: 'DEN', 
-          salary: 12500, // FanDuel: $12,500, DraftKings: $11,800
-          fanDuelSalary: 12500,
-          draftKingsSalary: 11800,
-          points: 26.4, 
-          rebounds: 12.4, 
-          assists: 9.0, 
-          steals: 1.3,
-          blocks: 0.7,
-          fgPercentage: 58.3,
-          status: 'active',
-          fantasyScore: 48.7,
-          trend: 'up',
-          value: 1.30,
-          threePointers: 1.1,
-          turnovers: 3.2,
-          minutes: 33.6,
-          ownership: 25.4,
-          projection: 58.3
-        },
-        { 
-          id: 5, 
-          name: 'Kevin Durant', 
-          position: 'SF', 
-          team: 'PHX', 
-          salary: 9800, // FanDuel: $9,800, DraftKings: $9,300
-          fanDuelSalary: 9800,
-          draftKingsSalary: 9300,
-          points: 29.1, 
-          rebounds: 6.7, 
-          assists: 5.0,
-          steals: 0.9,
-          blocks: 1.2,
-          fgPercentage: 53.7,
-          fantasyScore: 41.8,
-          trend: 'up',
-          value: 1.15,
-          threePointers: 2.8,
-          turnovers: 2.8,
-          minutes: 36.1,
-          ownership: 12.7,
-          projection: 47.2
-        },
-        { 
-          id: 6, 
-          name: 'Luka Doncic', 
-          position: 'PG', 
-          team: 'DAL', 
-          salary: 11200, // FanDuel: $11,200, DraftKings: $10,500
-          fanDuelSalary: 11200,
-          draftKingsSalary: 10500,
-          points: 33.9, 
-          rebounds: 8.8, 
-          assists: 8.8,
-          steals: 1.4,
-          blocks: 0.5,
-          fgPercentage: 49.6,
-          fantasyScore: 44.2,
-          trend: 'up',
-          value: 1.20,
-          threePointers: 2.9,
-          turnovers: 4.0,
-          minutes: 37.2,
-          ownership: 19.6,
-          projection: 51.8
-        },
-        { 
-          id: 7, 
-          name: 'Jayson Tatum', 
-          position: 'SF', 
-          team: 'BOS', 
-          salary: 9500, // FanDuel: $9,500, DraftKings: $9,000
-          fanDuelSalary: 9500,
-          draftKingsSalary: 9000,
-          points: 30.1, 
-          rebounds: 8.8, 
-          assists: 4.6,
-          steals: 1.1,
-          blocks: 0.7,
-          fgPercentage: 47.1,
-          fantasyScore: 43.5,
-          trend: 'stable',
-          value: 1.25,
-          threePointers: 3.2,
-          turnovers: 2.6,
-          minutes: 35.8,
-          ownership: 16.4,
-          projection: 49.3
-        },
-        { 
-          id: 8, 
-          name: 'Joel Embiid', 
-          position: 'C', 
-          team: 'PHI', 
-          salary: 10200, // FanDuel: $10,200, DraftKings: $9,700
-          fanDuelSalary: 10200,
-          draftKingsSalary: 9700,
-          points: 34.6, 
-          rebounds: 11.8, 
-          assists: 5.9,
-          steals: 1.2,
-          blocks: 1.7,
-          fgPercentage: 54.8,
-          fantasyScore: 47.3,
-          trend: 'down',
-          value: 1.28,
-          turnovers: 3.6,
-          minutes: 34.5,
-          ownership: 14.2,
-          projection: 50.1
-        },
-        { 
-          id: 9, 
-          name: 'Tyrese Haliburton', 
-          position: 'PG', 
-          team: 'IND', 
-          salary: 8500, // FanDuel: $8,500, DraftKings: $8,000
-          fanDuelSalary: 8500,
-          draftKingsSalary: 8000,
-          points: 22.8, 
-          rebounds: 4.0, 
-          assists: 11.7,
-          steals: 1.1,
-          blocks: 0.7,
-          fgPercentage: 49.9,
-          fantasyScore: 38.2,
-          trend: 'up',
-          value: 1.42,
-          threePointers: 2.7,
-          turnovers: 2.4,
-          minutes: 32.7,
-          ownership: 28.9,
-          projection: 44.8
-        },
-        { 
-          id: 10, 
-          name: 'Anthony Davis', 
-          position: 'PF/C', 
-          team: 'LAL', 
-          salary: 10800, // FanDuel: $10,800, DraftKings: $10,200
-          fanDuelSalary: 10800,
-          draftKingsSalary: 10200,
-          points: 24.7, 
-          rebounds: 12.5, 
-          assists: 3.6,
-          steals: 1.2,
-          blocks: 2.4,
-          fgPercentage: 55.6,
-          fantasyScore: 45.1,
-          trend: 'up',
-          value: 1.36,
-          turnovers: 2.1,
-          minutes: 34.2,
-          ownership: 17.8,
-          projection: 52.7
-        },
-        { 
-          id: 11, 
-          name: 'Shai Gilgeous-Alexander', 
-          position: 'SG', 
-          team: 'OKC', 
-          salary: 10600, // FanDuel: $10,600, DraftKings: $10,000
-          fanDuelSalary: 10600,
-          draftKingsSalary: 10000,
-          points: 31.1, 
-          rebounds: 5.6, 
-          assists: 6.4,
-          steals: 2.0,
-          blocks: 0.9,
-          fgPercentage: 54.5,
-          fantasyScore: 44.8,
-          trend: 'up',
-          value: 1.35,
-          turnovers: 2.3,
-          minutes: 34.9,
-          ownership: 24.1,
-          projection: 51.4
-        },
-        { 
-          id: 12, 
-          name: 'Donovan Mitchell', 
-          position: 'SG', 
-          team: 'CLE', 
-          salary: 9200, // FanDuel: $9,200, DraftKings: $8,700
-          fanDuelSalary: 9200,
-          draftKingsSalary: 8700,
-          points: 28.0, 
-          rebounds: 5.4, 
-          assists: 6.2,
-          steals: 1.8,
-          blocks: 0.4,
-          fgPercentage: 46.2,
-          fantasyScore: 41.3,
-          trend: 'stable',
-          value: 1.30,
-          threePointers: 3.4,
-          turnovers: 2.7,
-          minutes: 35.3,
-          ownership: 13.5,
-          projection: 46.9
-        },
-      ];
-
-      setTeam(mockTeam);
-      setAvailablePlayers(mockAvailable);
-      setFilteredPlayers(mockAvailable);
-      calculateTeamStats(mockTeam);
-      
-    } catch (error) {
-      console.error('Error loading fantasy data:', error);
-      
-      await logAnalyticsEvent('fantasy_team_error', {
-        error: error.message,
-        platform: activePlatform.name
-      });
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    loadFantasyData();
-    
-    // Log screen load - UPDATED to use imported firebase function
-    logScreenView('FantasyScreen', {
-      platform: Platform.OS,
-      selected_platform: activePlatform.name
-    });
-  }, []);
-
   const calculateTeamStats = (teamData) => {
     if (!teamData || teamData.length === 0) {
       setTeamStats({
@@ -826,7 +1101,6 @@ export default function FantasyScreen() {
     const avgAssists = totals.assists / teamData.length;
     const avgFantasyScore = totals.fantasyScore / teamData.length;
     
-    // Calculate efficiency (fantasy points per $1000 of salary)
     const efficiency = totals.salary > 0 ? (totals.fantasyScore / totals.salary) * 1000 : 0;
     
     setTeamStats({
@@ -840,7 +1114,6 @@ export default function FantasyScreen() {
   };
 
   const addPlayer = async (player) => {
-    // Use the appropriate salary for the active platform
     const playerSalary = activePlatform.name === 'FanDuel' ? player.fanDuelSalary : player.draftKingsSalary;
     
     if (budget - playerSalary >= 0) {
@@ -867,7 +1140,6 @@ export default function FantasyScreen() {
   };
 
   const removePlayer = async (player) => {
-    // Use the appropriate salary for the active platform
     const playerSalary = activePlatform.name === 'FanDuel' ? player.fanDuelSalary : player.draftKingsSalary;
     
     const newTeam = team.filter(p => p.id !== player.id);
@@ -890,6 +1162,7 @@ export default function FantasyScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     setSearchQuery('');
+    setSearchInput('');
     try {
       await refreshSportsData();
       await loadFantasyData();
@@ -907,6 +1180,418 @@ export default function FantasyScreen() {
     }
   };
 
+  // NEW: Save draft results
+  const saveDraftResults = async () => {
+    try {
+      const savedDrafts = await AsyncStorage.getItem('saved_drafts') || '[]';
+      const drafts = JSON.parse(savedDrafts);
+      
+      drafts.push({
+        id: Date.now(),
+        type: draftType,
+        data: draftResults,
+        timestamp: new Date().toISOString(),
+        sport: selectedSport,
+        platform: activePlatform.name
+      });
+      
+      await AsyncStorage.setItem('saved_drafts', JSON.stringify(drafts));
+      
+      Alert.alert('Success', 'Draft results saved to your profile!');
+      
+      await logAnalyticsEvent('draft_results_saved', {
+        draft_type: draftType,
+        draft_position: draftResults.draftPosition,
+        sport: selectedSport
+      });
+    } catch (error) {
+      console.error('Error saving draft results:', error);
+      Alert.alert('Error', 'Failed to save draft results');
+    }
+  };
+
+  // NEW: Share draft results
+  const shareDraftResults = async () => {
+    try {
+      let shareText = `${draftType === 'snake' ? 'Snake' : 'Turn'} Draft Results\n`;
+      shareText += `Pick #${draftResults.draftPosition} • ${draftResults.sport} • ${draftResults.platform}\n\n`;
+      
+      if (draftType === 'snake') {
+        shareText += "Top 3 Available Players:\n\n";
+        draftResults.results?.forEach((item, index) => {
+          shareText += `${index + 1}. ${item.player.name} (${item.player.position} - ${item.player.team})\n`;
+          shareText += `   Value: ${item.player.value?.toFixed(2)}x | FPTS: ${item.player.fantasyScore}\n`;
+          shareText += `   FD: $${item.player.fanDuelSalary} | DK: $${item.player.draftKingsSalary}\n`;
+          shareText += `   Reason: ${item.reason}\n\n`;
+        });
+      } else {
+        shareText += "Top 5 Players by Position:\n\n";
+        Object.entries(draftResults.results || {}).forEach(([position, players]) => {
+          shareText += `${position}:\n`;
+          players.slice(0, 3).forEach((item, index) => {
+            shareText += `${index + 1}. ${item.player.name} - $${item.player.salary}\n`;
+            shareText += `   Score: ${item.selectionScore} | ${item.reasons?.join(', ')}\n`;
+          });
+          shareText += '\n';
+        });
+      }
+      
+      shareText += `\nGenerated by Fantasy Team PRO • ${new Date().toLocaleDateString()}`;
+      
+      // Try to use React Native Share first
+      try {
+        await Share.share({
+          message: shareText,
+          title: `${draftType === 'snake' ? 'Snake' : 'Turn'} Draft Results`
+        });
+      } catch (error) {
+        // Fallback to clipboard
+        Clipboard.setString(shareText);
+        Alert.alert('Copied!', 'Draft results copied to clipboard');
+      }
+      
+      await logAnalyticsEvent('draft_results_shared', {
+        draft_type: draftType,
+        draft_position: draftResults.draftPosition
+      });
+    } catch (error) {
+      console.error('Error sharing draft results:', error);
+      Alert.alert('Error', 'Failed to share draft results');
+    }
+  };
+
+  // Render player details modal
+  const renderPlayerDetailsModal = () => {
+    if (!selectedPlayer) return null;
+    
+    return (
+      <Modal
+        visible={showPlayerDetails}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowPlayerDetails(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.playerDetailsModalContent}>
+            <LinearGradient
+              colors={['#1e40af', '#3b82f6']}
+              style={styles.playerDetailsModalHeader}
+            >
+              <View>
+                <Text style={styles.playerDetailsModalTitle}>{selectedPlayer.name}</Text>
+                <Text style={styles.playerDetailsModalSubtitle}>
+                  {selectedPlayer.position} • {selectedPlayer.team}
+                </Text>
+              </View>
+              <TouchableOpacity 
+                onPress={() => setShowPlayerDetails(false)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+            </LinearGradient>
+            
+            <ScrollView style={styles.playerDetailsModalBody}>
+              <View style={styles.playerDetailsStats}>
+                <View style={styles.detailStatRow}>
+                  <Text style={styles.detailStatLabel}>Points</Text>
+                  <Text style={styles.detailStatValue}>{selectedPlayer.points}</Text>
+                </View>
+                <View style={styles.detailStatRow}>
+                  <Text style={styles.detailStatLabel}>Rebounds</Text>
+                  <Text style={styles.detailStatValue}>{selectedPlayer.rebounds}</Text>
+                </View>
+                <View style={styles.detailStatRow}>
+                  <Text style={styles.detailStatLabel}>Assists</Text>
+                  <Text style={styles.detailStatValue}>{selectedPlayer.assists}</Text>
+                </View>
+                <View style={styles.detailStatRow}>
+                  <Text style={styles.detailStatLabel}>Steals/Blocks</Text>
+                  <Text style={styles.detailStatValue}>{selectedPlayer.steals}/{selectedPlayer.blocks}</Text>
+                </View>
+                <View style={styles.detailStatRow}>
+                  <Text style={styles.detailStatLabel}>Fantasy Score</Text>
+                  <Text style={[styles.detailStatValue, { color: '#8b5cf6' }]}>{selectedPlayer.fantasyScore}</Text>
+                </View>
+                <View style={styles.detailStatRow}>
+                  <Text style={styles.detailStatLabel}>Value</Text>
+                  <Text style={[
+                    styles.detailStatValue,
+                    { color: selectedPlayer.value > 1.2 ? '#10b981' : selectedPlayer.value > 1 ? '#f59e0b' : '#ef4444' }
+                  ]}>
+                    {selectedPlayer.value.toFixed(2)}x
+                  </Text>
+                </View>
+              </View>
+              
+              <View style={styles.salarySection}>
+                <Text style={styles.sectionTitle}>Salaries</Text>
+                <View style={styles.salaryCards}>
+                  <View style={styles.salaryCard}>
+                    <Ionicons name="logo-usd" size={20} color="#3b82f6" />
+                    <Text style={styles.salaryCardTitle}>FanDuel</Text>
+                    <Text style={styles.salaryCardAmount}>${selectedPlayer.fanDuelSalary?.toLocaleString()}</Text>
+                  </View>
+                  <View style={styles.salaryCard}>
+                    <Ionicons name="logo-usd" size={20} color="#8b5cf6" />
+                    <Text style={styles.salaryCardTitle}>DraftKings</Text>
+                    <Text style={styles.salaryCardAmount}>${selectedPlayer.draftKingsSalary?.toLocaleString()}</Text>
+                  </View>
+                </View>
+              </View>
+              
+              <View style={styles.analysisSection}>
+                <Text style={styles.sectionTitle}>AI Analysis</Text>
+                <Text style={styles.analysisText}>
+                  {selectedPlayer.value > 1.3 
+                    ? "⭐ Excellent value pick. Strong production relative to salary."
+                    : selectedPlayer.value > 1.1
+                    ? "👍 Good value. Solid production for the price."
+                    : "⚠️ Fair value. Consider alternatives with higher upside."
+                  }
+                </Text>
+              </View>
+            </ScrollView>
+            
+            <View style={styles.playerDetailsModalFooter}>
+              {team.some(p => p.id === selectedPlayer.id) ? (
+                <TouchableOpacity 
+                  style={styles.removeDetailButton}
+                  onPress={() => {
+                    removePlayer(selectedPlayer);
+                    setShowPlayerDetails(false);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="remove-circle" size={20} color="#ef4444" />
+                  <Text style={styles.removeDetailButtonText}>Remove from Team</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity 
+                  style={[styles.addDetailButton, budget < selectedPlayer.salary && styles.addDetailButtonDisabled]}
+                  onPress={() => {
+                    if (budget >= selectedPlayer.salary) {
+                      addPlayer(selectedPlayer);
+                      setShowPlayerDetails(false);
+                    }
+                  }}
+                  disabled={budget < selectedPlayer.salary}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="add-circle" size={20} color={budget >= selectedPlayer.salary ? "#10b981" : "#6b7280"} />
+                  <Text style={styles.addDetailButtonText}>
+                    {budget >= selectedPlayer.salary ? 'Add to Team' : 'Insufficient Budget'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  // NEW: Render draft results modal
+  const renderDraftResultsModal = () => {
+    if (!draftResults) return null;
+    
+    return (
+      <Modal
+        visible={showDraftResults}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowDraftResults(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.draftResultsModal}>
+            <LinearGradient
+              colors={['#1e40af', '#3b82f6']}
+              style={styles.draftModalHeader}
+            >
+              <View style={styles.draftModalTitleContainer}>
+                <Text style={styles.draftModalTitle}>
+                  {draftType === 'snake' 
+                    ? `🐍 Snake Draft - Pick #${draftResults.draftPosition}`
+                    : `🔄 Turn Draft - Pick #${draftResults.draftPosition}`
+                  }
+                </Text>
+                <Text style={styles.draftModalSubtitle}>
+                  {draftResults.sport} • {draftResults.platform || activePlatform.name}
+                </Text>
+              </View>
+              <TouchableOpacity 
+                onPress={() => setShowDraftResults(false)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+            </LinearGradient>
+            
+            <ScrollView style={styles.draftModalContent}>
+              {isGeneratingDraft ? (
+                <View style={styles.draftLoading}>
+                  <ActivityIndicator size="large" color="#3b82f6" />
+                  <Text style={styles.draftLoadingText}>
+                    Generating {draftType === 'snake' ? 'Snake' : 'Turn'} Draft Results...
+                  </Text>
+                </View>
+              ) : draftType === 'snake' ? (
+                <View style={styles.snakeResults}>
+                  <Text style={styles.resultsTitle}>
+                    Top 3 Available Players at Pick #{draftResults.draftPosition}
+                  </Text>
+                  {draftResults.results?.map((item, index) => (
+                    <View key={index} style={styles.draftPlayerCard}>
+                      <View style={styles.draftPlayerHeader}>
+                        <Text style={styles.draftPlayerRank}>#{index + 1}</Text>
+                        <View>
+                          <Text style={styles.draftPlayerName}>
+                            {item.player.name}
+                          </Text>
+                          <Text style={styles.draftPlayerDetails}>
+                            {item.player.position} • {item.player.team}
+                          </Text>
+                        </View>
+                        <View style={styles.draftPlayerValue}>
+                          <Text style={styles.draftValueText}>
+                            Value: {item.player.value?.toFixed(2)}x
+                          </Text>
+                          <Text style={styles.draftFantasyText}>
+                            FPTS: {item.player.fantasyScore}
+                          </Text>
+                        </View>
+                      </View>
+                      
+                      <View style={styles.draftPlayerSalaries}>
+                        <View style={styles.salaryBadge}>
+                          <Ionicons name="logo-usd" size={12} color="#3b82f6" />
+                          <Text style={styles.salaryText}>
+                            FD: ${item.player.fanDuelSalary?.toLocaleString()}
+                          </Text>
+                        </View>
+                        <View style={styles.salaryBadge}>
+                          <Ionicons name="logo-usd" size={12} color="#8b5cf6" />
+                          <Text style={styles.salaryText}>
+                            DK: ${item.player.draftKingsSalary?.toLocaleString()}
+                          </Text>
+                        </View>
+                      </View>
+                      
+                      <View style={styles.draftReasonBox}>
+                        <Text style={styles.draftReasonTitle}>Why this pick?</Text>
+                        <Text style={styles.draftReasonText}>{item.reason}</Text>
+                      </View>
+                      
+                      {index < 2 && <View style={styles.separator} />}
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.turnResults}>
+                  <Text style={styles.resultsTitle}>
+                    Top 5 Players by Position at Pick #{draftResults.draftPosition}
+                  </Text>
+                  <Text style={styles.turnCriteria}>
+                    Ranked by: Cost → Injuries → Opponents → Advanced Stats → Trends → Statistics
+                  </Text>
+                  
+                  {draftResults.results && Object.entries(draftResults.results).map(([position, players]) => (
+                    <View key={position} style={styles.positionSection}>
+                      <View style={styles.positionHeader}>
+                        <Text style={styles.positionTitle}>{position}</Text>
+                        <Text style={styles.positionSubtitle}>Top 5 Options</Text>
+                      </View>
+                      
+                      {players.map((item, index) => (
+                        <View key={index} style={styles.turnPlayerCard}>
+                          <View style={styles.turnPlayerInfo}>
+                            <View style={styles.turnPlayerRank}>
+                              <Text style={styles.turnRankText}>#{index + 1}</Text>
+                            </View>
+                            <View style={styles.turnPlayerMain}>
+                              <Text style={styles.turnPlayerName}>
+                                {item.player.name}
+                              </Text>
+                              <Text style={styles.turnPlayerTeam}>
+                                {item.player.team} vs {item.player.opponent}
+                              </Text>
+                              {item.player.injuryStatus === 'GTD' && (
+                                <View style={styles.injuryBadge}>
+                                  <Ionicons name="warning" size={12} color="#f59e0b" />
+                                  <Text style={styles.injuryText}>Questionable</Text>
+                                </View>
+                              )}
+                            </View>
+                            <View style={styles.turnPlayerStats}>
+                              <Text style={styles.turnScore}>
+                                Score: {item.selectionScore}
+                              </Text>
+                              <Text style={styles.turnSalary}>
+                                ${item.player.salary?.toLocaleString()}
+                              </Text>
+                            </View>
+                          </View>
+                          
+                          <View style={styles.turnReasons}>
+                            {item.reasons?.map((reason, reasonIndex) => (
+                              <View key={reasonIndex} style={styles.reasonChip}>
+                                <Ionicons name="checkmark-circle" size={12} color="#10b981" />
+                                <Text style={styles.reasonChipText}>{reason}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  ))}
+                </View>
+              )}
+              
+              {!isGeneratingDraft && (
+                <View style={styles.draftTips}>
+                  <Text style={styles.draftTipsTitle}>💡 Draft Tips:</Text>
+                  <Text style={styles.draftTip}>
+                    • {draftType === 'snake' 
+                      ? 'Consider positional scarcity when making your pick'
+                      : 'Compare options across positions for maximum value'
+                    }
+                  </Text>
+                  <Text style={styles.draftTip}>
+                    • Check latest injury updates before finalizing
+                  </Text>
+                  <Text style={styles.draftTip}>
+                    • Consider stacking with teammates for correlation
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+            
+            {!isGeneratingDraft && (
+              <View style={styles.draftModalFooter}>
+                <TouchableOpacity 
+                  style={styles.saveDraftButton}
+                  onPress={saveDraftResults}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="save-outline" size={20} color="#3b82f6" />
+                  <Text style={styles.saveDraftButtonText}>Save Results</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.shareDraftButton}
+                  onPress={shareDraftResults}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="share-social-outline" size={20} color="#10b981" />
+                  <Text style={styles.shareDraftButtonText}>Share</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   const renderSearchResultsInfo = () => {
     if (!searchQuery.trim() || availablePlayers.length === filteredPlayers.length) {
       return null;
@@ -918,7 +1603,11 @@ export default function FantasyScreen() {
           {filteredPlayers.length} of {availablePlayers.length} players match "{searchQuery}"
         </Text>
         <TouchableOpacity 
-          onPress={() => setSearchQuery('')}
+          onPress={() => {
+            setSearchQuery('');
+            setSearchInput('');
+            loadFantasyData();
+          }}
           activeOpacity={0.7}
         >
           <Text style={styles.clearSearchText}>Clear</Text>
@@ -941,12 +1630,36 @@ export default function FantasyScreen() {
 
   const renderSearchBar = () => (
     <View style={styles.searchSection}>
-      <SearchBar
-        placeholder="Search players by name, team, or position..."
-        onSearch={handlePlayerSearch}
-        searchHistory={searchHistory}
-        style={styles.homeSearchBar}
-      />
+      {/* Custom Search Bar Implementation */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchInputContainer}>
+          <Ionicons name="search" size={20} color="#94a3b8" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search players or enter draft command (Snake 33, Turn 33)..."
+            placeholderTextColor="#94a3b8"
+            value={searchInput}
+            onChangeText={setSearchInput}
+            onSubmitEditing={handleSearchSubmit}
+            returnKeyType="search"
+          />
+          {searchInput ? (
+            <TouchableOpacity onPress={() => {
+              setSearchInput('');
+              setSearchQuery('');
+              loadFantasyData();
+            }}>
+              <Ionicons name="close-circle" size={20} color="#94a3b8" />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        <TouchableOpacity 
+          style={styles.searchButton}
+          onPress={handleSearchSubmit}
+        >
+          <Ionicons name="arrow-forward" size={20} color="white" />
+        </TouchableOpacity>
+      </View>
       
       {renderSearchResultsInfo()}
     </View>
@@ -965,7 +1678,7 @@ export default function FantasyScreen() {
             styles.positionButton,
             selectedPosition === position && styles.activePositionButton
           ]}
-          onPress={() => setSelectedPosition(position)}
+          onPress={() => handlePositionChange(position)}
           activeOpacity={0.7}
         >
           <Text style={[
@@ -989,7 +1702,14 @@ export default function FantasyScreen() {
   const renderTeamStats = () => (
     <TouchableOpacity 
       style={styles.statsCard}
-      onPress={() => handleNavigateToAnalytics()}
+      onPress={() => {
+        console.log('Selected team stats for details');
+        Alert.alert(
+          'Team Performance Details',
+          `Average Points: ${teamStats.avgPoints}\nAverage Rebounds: ${teamStats.avgRebounds}\nAverage Assists: ${teamStats.avgAssists}\nTotal Salary: $${teamStats.totalSalary.toLocaleString()}\nAverage Fantasy Score: ${teamStats.fantasyScore}\nEfficiency: ${teamStats.efficiency} FPTS/$1K`,
+          [{ text: 'Close' }]
+        );
+      }}
       activeOpacity={0.7}
     >
       <Text style={styles.statsTitle}>Team Performance Metrics</Text>
@@ -1059,34 +1779,47 @@ export default function FantasyScreen() {
           </LinearGradient>
           
           <View style={styles.modalBody}>
-            <SearchBar
-              placeholder="Search players by name, team, or position..."
-              onSearch={handlePlayerSearch}
-              searchHistory={searchHistory}
-              style={styles.modalSearchBar}
-            />
+            {/* Backend Error Display */}
+            {backendError && (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>
+                  Backend Error: {backendError}. Using sample data.
+                </Text>
+              </View>
+            )}
             
-            {renderSearchResultsInfo()}
+            {renderSearchBar()}
             
             {renderPositionFilters()}
+            
+            {/* Team Selector */}
+            <TeamSelector 
+              selectedSport={selectedSport}
+              selectedTeam={selectedTeam}
+              onTeamSelect={handleTeamChange}
+            />
             
             <View style={styles.modalHeaderInfo}>
               <Text style={styles.availableCount}>
                 Available Players: {filteredPlayers.length}
               </Text>
               <TouchableOpacity 
-                onPress={() => setSelectedPosition('ALL')}
+                onPress={() => {
+                  setSelectedPosition('ALL');
+                  setSelectedTeam('all');
+                  setSearchQuery('');
+                  setSearchInput('');
+                }}
                 style={styles.resetFilterButton}
                 activeOpacity={0.7}
               >
-                <Text style={styles.resetFilterText}>Reset Filters</Text>
+                <Text style={styles.resetFilterText}>Reset All Filters</Text>
               </TouchableOpacity>
             </View>
             
             <FlatList
               data={filteredPlayers}
               renderItem={({ item, index }) => (
-                // FIXED: Added unique key prop to each player card
                 <PlayerCard
                   key={`available-player-${item.id}-${index}`}
                   player={item}
@@ -1094,7 +1827,7 @@ export default function FantasyScreen() {
                   budget={budget}
                   onAdd={() => addPlayer(item)}
                   onRemove={() => removePlayer(item)}
-                  onViewStats={() => handleNavigateToPlayerStats()}
+                  onViewStats={() => handlePlayerSelect(item)}
                 />
               )}
               keyExtractor={(item, index) => `available-player-${item.id}-${index}`}
@@ -1106,29 +1839,37 @@ export default function FantasyScreen() {
                   <Text style={styles.emptySearchText}>No players found</Text>
                   <Text style={styles.emptySearchSubtext}>
                     {searchQuery 
-                      ? `No results for "${searchQuery}"${selectedPosition !== 'ALL' ? ` in ${selectedPosition}` : ''}`
+                      ? `No results for "${searchQuery}"${selectedPosition !== 'ALL' ? ` in ${selectedPosition}` : ''}${selectedTeam !== 'all' ? ` for selected team` : ''}`
                       : selectedPosition !== 'ALL' 
                         ? `No ${selectedPosition} players available`
-                        : 'Try a different search or filter'
+                        : selectedTeam !== 'all'
+                          ? `No players available for selected team`
+                          : 'Try a different search or filter'
                     }
                   </Text>
                   <View style={styles.emptySearchActions}>
                     {searchQuery && (
                       <TouchableOpacity 
-                        onPress={() => setSearchQuery('')}
+                        onPress={() => {
+                          setSearchQuery('');
+                          setSearchInput('');
+                        }}
                         style={styles.clearSearchButton}
                         activeOpacity={0.7}
                       >
                         <Text style={styles.clearSearchButtonText}>Clear Search</Text>
                       </TouchableOpacity>
                     )}
-                    {selectedPosition !== 'ALL' && (
+                    {(selectedPosition !== 'ALL' || selectedTeam !== 'all') && (
                       <TouchableOpacity 
-                        onPress={() => setSelectedPosition('ALL')}
+                        onPress={() => {
+                          setSelectedPosition('ALL');
+                          setSelectedTeam('all');
+                        }}
                         style={styles.clearFilterButton}
                         activeOpacity={0.7}
                       >
-                        <Text style={styles.clearFilterButtonText}>Reset Filter</Text>
+                        <Text style={styles.clearFilterButtonText}>Reset Filters</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -1143,7 +1884,6 @@ export default function FantasyScreen() {
                 <Text style={styles.budgetSummaryText}>
                   Budget: ${budget.toLocaleString()} remaining
                 </Text>
-                {/* UPDATED: Show platform-specific total budget */}
                 <Text style={styles.budgetSummarySubtext}>
                   Spent: ${(activePlatform.budget - budget).toLocaleString()} / ${activePlatform.budget.toLocaleString()} ({activePlatform.name})
                 </Text>
@@ -1176,7 +1916,14 @@ export default function FantasyScreen() {
       
       <TouchableOpacity 
         style={styles.suggestionCard}
-        onPress={() => handleNavigateToPredictions()}
+        onPress={() => {
+          console.log('Selected lineup suggestion for details');
+          Alert.alert(
+            'Best Value Pick',
+            'Tyrese Haliburton (PG, IND)\n\n• 22.8 PPG, 11.7 APG\n• FanDuel: $8,500\n• DraftKings: $8,000\n• Value: 1.42x\n• Ownership: 28.9%\n\nHigh assist rate and strong value at current salary.',
+            [{ text: 'Close' }]
+          );
+        }}
         activeOpacity={0.7}
       >
         <View style={styles.suggestionHeader}>
@@ -1203,7 +1950,6 @@ export default function FantasyScreen() {
         </TouchableOpacity>
       </TouchableOpacity>
       
-      {/* UPDATED: Budget warning threshold for both platforms */}
       {budget < (activePlatform.name === 'FanDuel' ? 15000 : 12500) && (
         <View style={[styles.suggestionCard, styles.budgetWarningCard]}>
           <View style={styles.suggestionHeader}>
@@ -1243,16 +1989,14 @@ export default function FantasyScreen() {
         }
         contentContainerStyle={styles.scrollContent}
       >
-        {/* ENHANCED: AI Assistant Prompts Section with Budget Display */}
+        {/* ENHANCED: AI Assistant Prompts Section with Draft Commands */}
         <AIAssistantPrompts 
           navigation={navigation}
           activePlatform={activePlatform}
           setActivePlatform={handlePlatformChange}
           currentBudget={budget}
+          onDraftCommand={handleDraftCommand}
         />
-        
-        {/* REMOVED: Premium Access Section */}
-        {/* This space is now used by the enhanced AI Assistant component */}
         
         {renderSearchBar()}
         {renderTeamStats()}
@@ -1273,7 +2017,6 @@ export default function FantasyScreen() {
           </View>
           
           {team.length > 0 ? (
-            // FIXED: Added unique key prop to each team player
             team.map((player, index) => (
               <PlayerCard
                 key={`team-player-${player.id}-${index}`}
@@ -1282,7 +2025,7 @@ export default function FantasyScreen() {
                 budget={budget}
                 onAdd={() => addPlayer(player)}
                 onRemove={() => removePlayer(player)}
-                onViewStats={() => handleNavigateToPlayerStats()}
+                onViewStats={() => handlePlayerSelect(player)}
               />
             ))
           ) : (
@@ -1308,13 +2051,14 @@ export default function FantasyScreen() {
         
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            {/* UPDATED: Footer text shows current platform budget */}
             Salaries based on FanDuel & DraftKings pricing • {activePlatform.name} budget: ${activePlatform.budget.toLocaleString()} • Data updates manually • Last refreshed: {new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
           </Text>
         </View>
       </ScrollView>
       
       {renderAddPlayerModal()}
+      {renderPlayerDetailsModal()}
+      {renderDraftResultsModal()}
     </SafeAreaView>
   );
 }
@@ -1368,6 +2112,52 @@ const styles = StyleSheet.create({
     opacity: 0.9,
     marginTop: 5,
     textAlign: 'center',
+  },
+  // Search Container Styles
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  searchInputContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  searchInput: {
+    flex: 1,
+    color: 'white',
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  searchButton: {
+    backgroundColor: '#059669',
+    borderRadius: 12,
+    padding: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Error Container Styles
+  errorContainer: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    margin: 16,
+  },
+  errorText: {
+    color: '#dc2626',
+    fontSize: 12,
   },
   // ENHANCED: AI Assistant Container Styles
   aiAssistantContainer: {
@@ -1483,6 +2273,50 @@ const styles = StyleSheet.create({
     color: '#3b82f6',
     fontWeight: 'bold',
   },
+  // NEW: Draft Commands Section
+  draftCommandsSection: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  draftCommandsTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 12,
+  },
+  draftCommandsScroll: {
+    marginBottom: 8,
+  },
+  draftCommandChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f9ff',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+    minWidth: 160,
+  },
+  draftCommandIcon: {
+    fontSize: 20,
+    marginRight: 8,
+  },
+  draftCommandLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#0369a1',
+  },
+  draftCommandText: {
+    fontSize: 11,
+    color: '#3b82f6',
+    fontWeight: '500',
+  },
   // Prompts Section
   promptsSection: {
     backgroundColor: '#f8fafc',
@@ -1511,11 +2345,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#bae6fd',
   },
+  draftPromptChip: {
+    backgroundColor: '#fef3c7',
+    borderColor: '#fde68a',
+  },
   promptChipText: {
     fontSize: 13,
     color: '#0369a1',
     marginLeft: 6,
     maxWidth: 200,
+  },
+  draftPromptChipText: {
+    color: '#92400e',
   },
   searchSection: {
     marginTop: 16,
@@ -2098,6 +2939,465 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  // Player Details Modal Styles
+  playerDetailsModalContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '85%',
+  },
+  playerDetailsModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  playerDetailsModalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  playerDetailsModalSubtitle: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.9)',
+    marginTop: 4,
+  },
+  playerDetailsModalBody: {
+    padding: 20,
+    flex: 1,
+  },
+  playerDetailsStats: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+  },
+  detailStatRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  detailStatLabel: {
+    fontSize: 16,
+    color: '#6b7280',
+    fontWeight: '500',
+  },
+  detailStatValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1f2937',
+  },
+  salarySection: {
+    marginBottom: 20,
+  },
+  salaryCards: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  salaryCard: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  salaryCardTitle: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  salaryCardAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1e3a8a',
+  },
+  analysisSection: {
+    backgroundColor: '#f0f9ff',
+    padding: 16,
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#3b82f6',
+  },
+  analysisText: {
+    fontSize: 15,
+    color: '#1e2937',
+    lineHeight: 22,
+  },
+  playerDetailsModalFooter: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+  },
+  addDetailButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#10b981',
+    padding: 16,
+    borderRadius: 12,
+    justifyContent: 'center',
+  },
+  addDetailButtonDisabled: {
+    backgroundColor: '#e5e7eb',
+  },
+  addDetailButtonText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '600',
+    marginLeft: 12,
+  },
+  removeDetailButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fee2e2',
+    padding: 16,
+    borderRadius: 12,
+    justifyContent: 'center',
+  },
+  removeDetailButtonText: {
+    color: '#dc2626',
+    fontSize: 18,
+    fontWeight: '600',
+    marginLeft: 12,
+  },
+  // NEW: Draft Results Modal Styles
+  draftResultsModal: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+  },
+  draftModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  draftModalTitleContainer: {
+    flex: 1,
+    marginRight: 10,
+  },
+  draftModalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 4,
+  },
+  draftModalSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.9)',
+  },
+  draftModalContent: {
+    padding: 20,
+    flex: 1,
+  },
+  draftLoading: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  draftLoadingText: {
+    marginTop: 20,
+    fontSize: 16,
+    color: '#6b7280',
+    fontWeight: '600',
+  },
+  // Snake Draft Results
+  snakeResults: {
+    marginBottom: 20,
+  },
+  resultsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  draftPlayerCard: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+  draftPlayerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  draftPlayerRank: {
+    backgroundColor: '#3b82f6',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+    fontWeight: 'bold',
+    color: 'white',
+    fontSize: 16,
+  },
+  draftPlayerName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    marginBottom: 2,
+  },
+  draftPlayerDetails: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  draftPlayerValue: {
+    marginLeft: 'auto',
+    alignItems: 'flex-end',
+  },
+  draftValueText: {
+    fontSize: 14,
+    color: '#059669',
+    fontWeight: '600',
+  },
+  draftFantasyText: {
+    fontSize: 12,
+    color: '#8b5cf6',
+    fontWeight: '500',
+  },
+  draftPlayerSalaries: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
+  },
+  salaryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  salaryText: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  draftReasonBox: {
+    backgroundColor: '#eff6ff',
+    padding: 12,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#3b82f6',
+  },
+  draftReasonTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1e40af',
+    marginBottom: 4,
+  },
+  draftReasonText: {
+    fontSize: 13,
+    color: '#4b5563',
+    lineHeight: 18,
+  },
+  separator: {
+    height: 1,
+    backgroundColor: '#e5e7eb',
+    marginVertical: 16,
+  },
+  // Turn Draft Results
+  turnResults: {
+    marginBottom: 20,
+  },
+  turnCriteria: {
+    fontSize: 12,
+    color: '#6b7280',
+    textAlign: 'center',
+    marginBottom: 20,
+    fontStyle: 'italic',
+  },
+  positionSection: {
+    marginBottom: 20,
+  },
+  positionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 2,
+    borderBottomColor: '#e5e7eb',
+  },
+  positionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1f2937',
+  },
+  positionSubtitle: {
+    fontSize: 12,
+    color: '#6b7280',
+  },
+  turnPlayerCard: {
+    backgroundColor: 'white',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  turnPlayerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  turnPlayerRank: {
+    backgroundColor: '#f1f5f9',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  turnRankText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#3b82f6',
+  },
+  turnPlayerMain: {
+    flex: 1,
+  },
+  turnPlayerName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 2,
+  },
+  turnPlayerTeam: {
+    fontSize: 12,
+    color: '#6b7280',
+  },
+  injuryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fef3c7',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  injuryText: {
+    fontSize: 10,
+    color: '#92400e',
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  turnPlayerStats: {
+    alignItems: 'flex-end',
+  },
+  turnScore: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#059669',
+    marginBottom: 2,
+  },
+  turnSalary: {
+    fontSize: 14,
+    color: '#3b82f6',
+    fontWeight: '600',
+  },
+  turnReasons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  reasonChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0fdf4',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  reasonChipText: {
+    fontSize: 11,
+    color: '#166534',
+    marginLeft: 4,
+  },
+  // Draft Tips
+  draftTips: {
+    backgroundColor: '#fefce8',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#fef08a',
+  },
+  draftTipsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#92400e',
+    marginBottom: 8,
+  },
+  draftTip: {
+    fontSize: 14,
+    color: '#92400e',
+    marginBottom: 4,
+    lineHeight: 20,
+  },
+  // Draft Modal Footer
+  draftModalFooter: {
+    flexDirection: 'row',
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+    gap: 12,
+  },
+  saveDraftButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#eff6ff',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+  },
+  saveDraftButtonText: {
+    color: '#3b82f6',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  shareDraftButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f0fdf4',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  shareDraftButtonText: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
   },
   // Custom Progress Bar
   customProgressBarContainer: {

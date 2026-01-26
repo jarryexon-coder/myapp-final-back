@@ -1,8 +1,11 @@
-import React from 'react';
+// App.js - UPDATED (remove problematic test)
+import React, { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
-import { ErrorUtils, Text, View, StyleSheet, LogBox, TouchableOpacity } from 'react-native';
-import RootWrapper from './src/components/RootWrapper'; // ADDED IMPORT
+import { Text, View, StyleSheet, LogBox, TouchableOpacity } from 'react-native';
+import { SearchProvider } from './src/providers/SearchProvider';
+import { AuthProvider } from './src/hooks/useAuth';
+import GroupedTabNavigator from './src/navigation/GroupedTabNavigator';
 
 // Suppress specific warnings if needed
 LogBox.ignoreLogs([
@@ -11,11 +14,11 @@ LogBox.ignoreLogs([
   // Add any other warnings you want to suppress
 ]);
 
-// ENHANCED GLOBAL ERROR HANDLER
-if (ErrorUtils && ErrorUtils.getGlobalHandler) {
-  const originalErrorHandler = ErrorUtils.getGlobalHandler();
+// SAFE ERROR HANDLING
+if (typeof global !== 'undefined' && global.ErrorUtils) {
+  const originalErrorHandler = global.ErrorUtils.getGlobalHandler();
   
-  ErrorUtils.setGlobalHandler((error, isFatal) => {
+  global.ErrorUtils.setGlobalHandler((error, isFatal) => {
     console.error('🔥🔥🔥 GLOBAL ERROR CAUGHT 🔥🔥🔥');
     console.error('🔥 Message:', error.message);
     console.error('🔥 Is Fatal:', isFatal);
@@ -174,7 +177,11 @@ export default function App() {
     <ErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <NavigationContainer>
-          <RootWrapper /> {/* REPLACED GroupedTabNavigator with RootWrapper */}
+          <AuthProvider>
+            <SearchProvider>
+              <GroupedTabNavigator />
+            </SearchProvider>
+          </AuthProvider>
         </NavigationContainer>
       </GestureHandlerRootView>
     </ErrorBoundary>

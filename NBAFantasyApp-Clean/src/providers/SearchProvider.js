@@ -14,8 +14,8 @@ const SearchProvider = ({ children }) => {
   // Use useRef for stable function references
   const searchHistoryRef = useRef([]);
 
-  // Save search to history - stable callback
-  const saveToSearchHistory = useCallback((query) => {
+  // Save search to history - stable callback (renamed as per File 1)
+  const addToSearchHistory = useCallback((query) => {
     if (!query.trim()) return;
     
     const updatedHistory = [
@@ -29,7 +29,7 @@ const SearchProvider = ({ children }) => {
     setSearchHistory(updatedHistory);
   }, []);
 
-  // Perform search - stable callback
+  // Perform search - stable callback (updated to use addToSearchHistory)
   const performSearch = useCallback(async (query) => {
     if (!query.trim()) {
       setSearchResults([]);
@@ -38,7 +38,7 @@ const SearchProvider = ({ children }) => {
 
     setIsSearching(true);
     setSearchQuery(query);
-    saveToSearchHistory(query);
+    addToSearchHistory(query);
 
     try {
       // Simulate API search with timeout
@@ -63,7 +63,7 @@ const SearchProvider = ({ children }) => {
       setIsSearching(false);
       setSearchResults([]);
     }
-  }, [saveToSearchHistory]);
+  }, [addToSearchHistory]);
 
   // Clear search - stable callback
   const clearSearch = useCallback(() => {
@@ -78,6 +78,7 @@ const SearchProvider = ({ children }) => {
   }, []);
 
   // Context value - memoized to prevent unnecessary re-renders
+  // Updated per File 1 to include addToSearchHistory
   const contextValue = {
     searchQuery,
     setSearchQuery,
@@ -87,6 +88,7 @@ const SearchProvider = ({ children }) => {
     performSearch,
     clearSearch,
     clearSearchHistory,
+    addToSearchHistory, // Added as per File 1
   };
 
   return (

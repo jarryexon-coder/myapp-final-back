@@ -1,5 +1,5 @@
-// src/screens/HomeScreen-enhanced-login.js - COMPLETELY REDESIGNED
-import React, { useState } from 'react';
+// src/screens/HomeScreen.js - UPDATED WITH LOGOUT FUNCTIONALITY
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -16,12 +16,59 @@ import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import revenueCatService from '../services/revenuecat-service';
+import { useAppNavigation } from '../navigation/NavigationHelper'; // NEW: Import navigation helper
 
 const { width } = Dimensions.get('window');
 
 const HomeScreen = () => {
   const navigation = useNavigation();
+  const appNavigation = useAppNavigation(); // NEW: Use the navigation helper
   const [devTapCount, setDevTapCount] = useState(0);
+  const [isLoggedIn, setIsLoggedIn] = useState(false); // NEW: Track login state
+
+  // NEW: Check login status on mount
+  useEffect(() => {
+    // You can replace this with actual authentication check
+    const checkLoginStatus = async () => {
+      // Example: Check AsyncStorage or your auth service
+      // const token = await AsyncStorage.getItem('userToken');
+      // setIsLoggedIn(!!token);
+      setIsLoggedIn(false); // Default to not logged in
+    };
+    
+    checkLoginStatus();
+  }, []);
+
+  // NEW: Handle login
+  const handleLogin = () => {
+    appNavigation.goToLoginScreen();
+  };
+
+  // NEW: Handle logout
+  const handleLogout = () => {
+    Alert.alert(
+      "Logout",
+      "Are you sure you want to logout?",
+      [
+        {
+          text: "Cancel",
+          style: "cancel"
+        },
+        { 
+          text: "Logout", 
+          onPress: async () => {
+            // Add your logout logic here
+            // Example: Clear tokens, reset state
+            // await AsyncStorage.removeItem('userToken');
+            // await AsyncStorage.removeItem('userData');
+            
+            setIsLoggedIn(false);
+            appNavigation.logout(); // Use the logout function from NavigationHelper
+          }
+        }
+      ]
+    );
+  };
 
   // Development menu handler
   const showDevMenu = () => {
@@ -107,21 +154,21 @@ const HomeScreen = () => {
     { 
       title: 'Live Games', 
       icon: 'game-controller-outline',
-      onPress: () => navigation.navigate('AllAccess', { screen: 'LiveGames' }),
+      onPress: () => appNavigation.goToLiveGames(),
       color: '#3b82f6',
       subtitle: 'Real-time tracking'
     },
     { 
       title: 'NFL Analytics', 
       icon: 'american-football-outline',
-      onPress: () => navigation.navigate('AllAccess', { screen: 'NFLAnalytics' }),
+      onPress: () => appNavigation.goToNFL(),
       color: '#ef4444',
       subtitle: 'Advanced stats'
     },
     { 
       title: 'News Desk', 
       icon: 'newspaper-outline',
-      onPress: () => navigation.navigate('AllAccess', { screen: 'NewsDesk' }),
+      onPress: () => appNavigation.goToNewsDesk(),
       color: '#8b5cf6',
       subtitle: 'Latest updates'
     },
@@ -132,35 +179,35 @@ const HomeScreen = () => {
     { 
       title: 'Fantasy Hub',
       icon: 'trophy-outline', 
-      onPress: () => navigation.navigate('SuperStats', { screen: 'FantasyHub' }),
+      onPress: () => appNavigation.goToFantasyHub(),
       color: '#ec4899',
       subtitle: 'Team management'
     },
     { 
       title: 'Player Stats',
       icon: 'stats-chart-outline', 
-      onPress: () => navigation.navigate('AIGenerators', { screen: 'PlayerMetrics' }),
+      onPress: () => appNavigation.goToPlayerStats(),
       color: '#10b981',
       subtitle: 'Performance data'
     },
     { 
       title: 'Sports Wire',
       icon: 'wifi-outline', 
-      onPress: () => navigation.navigate('AIGenerators', { screen: 'SportsWire' }),
+      onPress: () => appNavigation.goToSportsWire(),
       color: '#6366f1',
       subtitle: 'Breaking news'
     },
     { 
       title: 'NHL Trends', 
       icon: 'ice-cream-outline',
-      onPress: () => navigation.navigate('SuperStats', { screen: 'NHLTrends' }),
+      onPress: () => appNavigation.goToNHLTrends(),
       color: '#06b6d4',
       subtitle: 'Ice analytics'
     },
     { 
       title: 'Match Analytics',
       icon: 'analytics-outline', 
-      onPress: () => navigation.navigate('SuperStats', { screen: 'MatchAnalytics' }),
+      onPress: () => appNavigation.goToMatchAnalytics(),
       color: '#f59e0b',
       subtitle: 'Game breakdown'
     },
@@ -171,57 +218,75 @@ const HomeScreen = () => {
     { 
       title: 'Daily Picks',
       icon: 'star-outline', 
-      onPress: () => navigation.navigate('AIGenerators', { screen: 'ExpertSelections' }),
+      onPress: () => appNavigation.goToDailyPicks(),
       color: '#f59e0b',
       subtitle: 'AI selections'
     },
     { 
       title: 'Parlay Architect',
       icon: 'layers-outline', 
-      onPress: () => navigation.navigate('AIGenerators', { screen: 'ParlayArchitect' }),
+      onPress: () => appNavigation.goToParlayArchitect(),
       color: '#8b5cf6',
       subtitle: 'Build combos'
     },
     { 
       title: 'Advanced Analytics',
       icon: 'trending-up-outline', 
-      onPress: () => navigation.navigate('AIGenerators', { screen: 'AdvancedAnalytics' }),
+      onPress: () => appNavigation.goToAdvancedAnalytics(),
       color: '#06b6d4',
       subtitle: 'Deep insights'
     },
     { 
       title: 'Predictions',
       icon: 'bulb-outline', 
-      onPress: () => navigation.navigate('AIGenerators', { screen: 'PredictionsOutcome' }),
+      onPress: () => appNavigation.goToPredictionsOutcome(),
       color: '#8b5cf6',
       subtitle: 'AI forecasts'
     },
   ];
 
-  // 4. Elite Tools Category (Premium)
-  const eliteToolsItems = [
-    { 
-      title: 'Kalshi Markets',
-      icon: 'trending-up-outline', 
-      onPress: () => navigation.navigate('KalshiMarkets', { screen: 'KalshiPredictions' }),
-      color: '#8b5cf6',
-      subtitle: 'Prediction markets'
+// In the eliteToolsItems array, update the PrizePicks button:
+const eliteToolsItems = [
+  { 
+    title: 'Kalshi Markets',
+    icon: 'trending-up-outline', 
+    onPress: () => appNavigation.goToKalshiPredictions(),
+    color: '#8b5cf6',
+    subtitle: 'Prediction markets'
+  },
+  { 
+    title: 'Secret Phrases',
+    icon: 'key-outline', 
+    onPress: () => appNavigation.goToSecretPhrases(),
+    color: '#f59e0b',
+    subtitle: 'Hidden patterns'
+  },
+  { 
+    title: 'PrizePicks Generator', // NEW
+    icon: 'dice-outline', 
+    onPress: () => {
+      console.log('Attempting to navigate to PrizePicksGenerator...');
+      try {
+        appNavigation.goToPrizePicksGenerator();
+      } catch (error) {
+        console.error('Navigation error:', error);
+        // Fallback navigation
+        navigation.navigate('EliteTools', { 
+          screen: 'PrizePicksGenerator' 
+        });
+      }
     },
-    { 
-      title: 'Secret Phrases',
-      icon: 'key-outline', 
-      onPress: () => navigation.navigate('AIGenerators', { screen: 'SecretPhrases' }),
-      color: '#f59e0b',
-      subtitle: 'Hidden patterns'
-    },
-    { 
-      title: 'Subscription',
-      icon: 'diamond-outline', 
-      onPress: () => navigation.navigate('Subscription'),
-      color: '#10b981',
-      subtitle: 'Go premium'
-    },
-  ];
+    color: '#10b981',
+    subtitle: 'Generate picks'
+  },
+  { 
+    title: 'Subscription',
+    icon: 'diamond-outline', 
+    onPress: () => appNavigation.goToSubscription(),
+    color: '#ec4899',
+    subtitle: 'Go premium'
+  },
+];
 
   // Dashboard feature highlights with catchy phrases
   const features = [
@@ -232,9 +297,9 @@ const HomeScreen = () => {
       color: '#10b981',
     },
     {
-      title: 'Secret Phrase Detection',
-      description: 'Uncover hidden betting patterns with our NLP-powered phrase analysis',
-      icon: 'key-outline',
+      title: 'PrizePicks Generator',
+      description: 'Generate optimal PrizePicks selections with our advanced AI algorithms', // UPDATED
+      icon: 'dice-outline',
       color: '#8b5cf6',
     },
     {
@@ -254,9 +319,9 @@ const HomeScreen = () => {
       color: '#3b82f6',
     },
     {
-      title: 'Why Choose Us',
-      content: 'Combining human expertise with machine learning for the most accurate sports analytics available.',
-      icon: 'checkmark-circle-outline',
+      title: 'PrizePicks Integration',
+      content: 'Generate optimized picks for PrizePicks using our proprietary algorithm and historical data analysis.', // NEW
+      icon: 'dice-outline',
       color: '#10b981',
     },
     {
@@ -315,12 +380,22 @@ const HomeScreen = () => {
           <Text style={styles.appSubtitle}>Humanistic Approach to Analytics At Its Finest</Text>
         </View>
         <View style={styles.headerButtons}>
-          <TouchableOpacity 
-            style={styles.loginButton}
-            onPress={() => navigation.navigate('Login')}
-          >
-            <Ionicons name="log-in-outline" size={20} color="white" />
-          </TouchableOpacity>
+          {/* UPDATED: Show login or logout button based on state */}
+          {isLoggedIn ? (
+            <TouchableOpacity 
+              style={styles.logoutButton}
+              onPress={handleLogout}
+            >
+              <Ionicons name="log-out-outline" size={20} color="white" />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity 
+              style={styles.loginButton}
+              onPress={handleLogin}
+            >
+              <Ionicons name="log-in-outline" size={20} color="white" />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity 
             style={styles.devMenuButton}
             onPress={showDevMenu}
@@ -331,7 +406,7 @@ const HomeScreen = () => {
         {/* DEVELOPMENT MENU TRIGGER */}
         <TouchableOpacity onPress={handleVersionTap} style={styles.devTrigger}>
           <Text style={styles.versionText}>
-            Version 1.0.0 {devTapCount > 0 ? `${devTapCount}/5 taps` : ''}
+            Version 1.1.0 {devTapCount > 0 ? `${devTapCount}/5 taps` : ''} {/* UPDATED VERSION */}
           </Text>
         </TouchableOpacity>
       </LinearGradient>
@@ -395,7 +470,7 @@ const HomeScreen = () => {
             items={aiGeneratorsItems}
           />
           
-          {/* Elite Tools Category */}
+          {/* Elite Tools Category - NOW INCLUDES PRIZEPICKS */}
           <QuickAccessCategory
             title="Elite Tools"
             subtitle="Premium features & utilities"
@@ -465,7 +540,7 @@ const HomeScreen = () => {
             </Text>
             <TouchableOpacity 
               style={styles.ctaButton}
-              onPress={() => navigation.navigate('Subscription')}
+              onPress={() => appNavigation.goToSubscription()}
             >
               <Text style={styles.ctaButtonText}>Start Free Trial</Text>
             </TouchableOpacity>
@@ -486,7 +561,7 @@ const HomeScreen = () => {
           
           <TouchableOpacity 
             style={styles.bottomNavItem}
-            onPress={() => navigation.navigate('Subscription')}
+            onPress={() => appNavigation.goToSubscription()}
           >
             <Ionicons name="diamond-outline" size={20} color="#94a3b8" />
             <Text style={styles.bottomNavText}>Upgrade</Text>
@@ -496,7 +571,7 @@ const HomeScreen = () => {
           
           <TouchableOpacity 
             style={styles.bottomNavItem}
-            onPress={() => navigation.navigate('AllAccess')}
+            onPress={() => appNavigation.goToAllAccess()}
           >
             <Ionicons name="help-circle-outline" size={20} color="#94a3b8" />
             <Text style={styles.bottomNavText}>Help</Text>
@@ -562,6 +637,15 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     backgroundColor: '#3b82f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  logoutButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#ef4444',
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,

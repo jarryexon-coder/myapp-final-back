@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,9 +12,11 @@ import {
   Modal,
   TextInput,
   Alert,
+  FlatList,
 } from 'react-native';
+import { useSearch } from "../providers/SearchProvider";
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -95,12 +97,16 @@ const auth = {
   }
 };
 
+
 const EditorUpdatesScreen = () => {
   const navigation = useNavigation();
+  const route = useRoute();
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [updates, setUpdates] = useState([]);
   const [winningPosts, setWinningPosts] = useState([]);
+  const [filteredUpdates, setFilteredUpdates] = useState([]);
+  const [filteredWinningPosts, setFilteredWinningPosts] = useState([]);
   const [readStatus, setReadStatus] = useState({});
   const [user, setUser] = useState(null);
   const [lastRefresh, setLastRefresh] = useState(new Date());
@@ -111,6 +117,12 @@ const EditorUpdatesScreen = () => {
   const [postAmount, setPostAmount] = useState('');
   const [postSport, setPostSport] = useState('NFL');
   const [activeTab, setActiveTab] = useState('updates'); // 'updates' or 'wins'
+  
+  // Search functionality states
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearchHistory, setShowSearchHistory] = useState(false);
+  const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();  
 
   const updateCategories = {
     feature: { icon: 'rocket', color: '#3b82f6', label: 'Feature', gradient: ['#3b82f6', '#1d4ed8'] },
@@ -142,6 +154,14 @@ const EditorUpdatesScreen = () => {
     });
   }, [user]);
 
+  // Handle navigation params for initial search
+  useEffect(() => {
+    if (route.params?.initialSearch) {
+      setSearchInput(route.params.initialSearch);
+      handleSearchSubmit(route.params.initialSearch);
+    }
+  }, [route.params]);
+
   const fetchUpdates = async (isRefresh = false) => {
     try {
       setLoading(true);
@@ -160,7 +180,9 @@ const EditorUpdatesScreen = () => {
       }
 
       setUpdates(updatesData);
+      setFilteredUpdates(updatesData);
       setWinningPosts(winsData);
+      setFilteredWinningPosts(winsData);
       setLastRefresh(new Date());
       
       await logEvent('editor_updates_fetch_success', {
@@ -179,8 +201,12 @@ const EditorUpdatesScreen = () => {
       
       // Show sample data if fetch fails
       if (updates.length === 0) {
-        setUpdates(getSampleUpdates());
-        setWinningPosts(getSampleWins());
+        const updatesData = getSampleUpdates();
+        const winsData = getSampleWins();
+        setUpdates(updatesData);
+        setFilteredUpdates(updatesData);
+        setWinningPosts(winsData);
+        setFilteredWinningPosts(winsData);
       }
     } finally {
       setLoading(false);
@@ -201,6 +227,68 @@ const EditorUpdatesScreen = () => {
     } catch (error) {
       console.error('Error fetching read status:', error);
     }
+  };
+
+  // Handle search functionality
+  const handleSearchSubmit = async (customQuery = null) => {
+    const query = customQuery || searchInput.trim();
+    
+    if (query) {
+      await addToSearchHistory(query);
+      setSearchQuery(query);
+      setShowSearchHistory(false);
+      
+      // Apply search filter
+      filterContent(query);
+      
+      await logEvent('community_search', {
+        query: query,
+        tab: activeTab,
+        user_id: user?.uid || 'anonymous',
+      });
+    } else {
+      // Clear search
+      setSearchQuery('');
+      setFilteredUpdates(updates);
+      setFilteredWinningPosts(winningPosts);
+    }
+  };
+
+  // Filter content based on search query
+  const filterContent = (query) => {
+    const searchLower = query.toLowerCase().trim();
+    
+    if (activeTab === 'updates') {
+      const filtered = updates.filter(update => {
+        return (
+          update.title.toLowerCase().includes(searchLower) ||
+          update.description.toLowerCase().includes(searchLower) ||
+          update.category.toLowerCase().includes(searchLower) ||
+          updateCategories[update.category]?.label.toLowerCase().includes(searchLower)
+        );
+      });
+      setFilteredUpdates(filtered);
+    } else {
+      const filtered = winningPosts.filter(post => {
+        return (
+          post.title.toLowerCase().includes(searchLower) ||
+          post.description.toLowerCase().includes(searchLower) ||
+          post.sport.toLowerCase().includes(searchLower) ||
+          post.userName.toLowerCase().includes(searchLower) ||
+          post.amount.toLowerCase().includes(searchLower)
+        );
+      });
+      setFilteredWinningPosts(filtered);
+    }
+  };
+
+  // Clear search
+  const handleClearSearch = () => {
+    setSearchInput('');
+    setSearchQuery('');
+    setFilteredUpdates(updates);
+    setFilteredWinningPosts(winningPosts);
+    setShowSearchHistory(false);
   };
 
   const formatDate = (timestamp) => {
@@ -296,7 +384,9 @@ const EditorUpdatesScreen = () => {
       };
 
       // Add to local state instead of Firestore
-      setWinningPosts(prev => [winData, ...prev]);
+      const newWinningPosts = [winData, ...winningPosts];
+      setWinningPosts(newWinningPosts);
+      setFilteredWinningPosts(newWinningPosts);
       
       await logEvent('winning_post_created', {
         user_id: user.uid,
@@ -334,11 +424,13 @@ const EditorUpdatesScreen = () => {
       });
       
       // Update local state
-      setWinningPosts(prev => prev.map(post => 
+      const updatedPosts = winningPosts.map(post => 
         post.id === postId 
           ? { ...post, likes: (post.likes || 0) + 1 }
           : post
-      ));
+      );
+      setWinningPosts(updatedPosts);
+      setFilteredWinningPosts(updatedPosts);
     } catch (error) {
       console.error('Error liking post:', error);
     }
@@ -380,29 +472,108 @@ const EditorUpdatesScreen = () => {
         )}
       </View>
 
-      {/* Tabs - Enhanced from File 1 */}
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchInputContainer}>
+          <Ionicons name="search" size={20} color="#94a3b8" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search updates, wins, or users..."
+            placeholderTextColor="#94a3b8"
+            value={searchInput}
+            onChangeText={setSearchInput}
+            onSubmitEditing={() => handleSearchSubmit()}
+            returnKeyType="search"
+            onFocus={() => searchInput.length > 0 && setShowSearchHistory(true)}
+          />
+          {searchInput.length > 0 && (
+            <TouchableOpacity onPress={handleClearSearch} style={styles.clearButton}>
+              <Ionicons name="close-circle" size={20} color="#94a3b8" />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity 
+            onPress={() => handleSearchSubmit()}
+            style={styles.searchButton}
+          >
+            <Ionicons name="arrow-forward" size={20} color="white" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Tabs */}
       <View style={styles.tabsContainer}>
         <TouchableOpacity 
           style={[styles.tab, activeTab === 'updates' && styles.activeTab]}
-          onPress={() => setActiveTab('updates')}
+          onPress={() => {
+            setActiveTab('updates');
+            if (searchQuery) {
+              filterContent(searchQuery);
+            }
+          }}
         >
           <Ionicons name="newspaper" size={20} color={activeTab === 'updates' ? 'white' : 'rgba(255,255,255,0.7)'} />
           <Text style={[styles.tabText, activeTab === 'updates' && styles.activeTabText]}>
-            Updates ({updates.length})
+            Updates ({searchQuery ? filteredUpdates.length : updates.length})
           </Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
           style={[styles.tab, activeTab === 'wins' && styles.activeTab]}
-          onPress={() => setActiveTab('wins')}
+          onPress={() => {
+            setActiveTab('wins');
+            if (searchQuery) {
+              filterContent(searchQuery);
+            }
+          }}
         >
           <Ionicons name="trophy" size={20} color={activeTab === 'wins' ? 'white' : 'rgba(255,255,255,0.7)'} />
           <Text style={[styles.tabText, activeTab === 'wins' && styles.activeTabText]}>
-            Wins ({winningPosts.length})
+            Wins ({searchQuery ? filteredWinningPosts.length : winningPosts.length})
           </Text>
         </TouchableOpacity>
       </View>
     </LinearGradient>
+  );
+
+  // Search History Component
+  const renderSearchHistory = () => (
+    <Modal
+      visible={showSearchHistory && searchHistory.length > 0}
+      animationType="fade"
+      transparent={true}
+      onRequestClose={() => setShowSearchHistory(false)}
+    >
+      <TouchableOpacity 
+        style={styles.historyOverlay}
+        activeOpacity={1}
+        onPress={() => setShowSearchHistory(false)}
+      >
+        <View style={styles.historyContainer}>
+          <View style={styles.historyHeader}>
+            <Text style={styles.historyTitle}>Recent Searches</Text>
+            <TouchableOpacity onPress={clearSearchHistory}>
+              <Text style={styles.clearHistoryText}>Clear All</Text>
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            data={searchHistory}
+            keyExtractor={(item, index) => index.toString()}
+            renderItem={({ item }) => (
+              <TouchableOpacity 
+                style={styles.historyItem}
+                onPress={() => {
+                  setSearchInput(item);
+                  handleSearchSubmit(item);
+                }}
+              >
+                <Ionicons name="time-outline" size={18} color="#94a3b8" />
+                <Text style={styles.historyText}>{item}</Text>
+              </TouchableOpacity>
+            )}
+          />
+        </View>
+      </TouchableOpacity>
+    </Modal>
   );
 
   const renderUpdateCard = (update) => {
@@ -630,8 +801,22 @@ const EditorUpdatesScreen = () => {
   return (
     <View style={styles.container}>
       {renderHeader()}
+      {renderSearchHistory()}
       
-      {/* Post Win Button - Enhanced from File 1 */}
+      {/* Search Results Info */}
+      {searchQuery && (
+        <View style={styles.searchResultsInfo}>
+          <Text style={styles.searchResultsText}>
+            Search results for "{searchQuery}" 
+            {activeTab === 'updates' ? ` (${filteredUpdates.length} updates)` : ` (${filteredWinningPosts.length} wins)`}
+          </Text>
+          <TouchableOpacity onPress={handleClearSearch}>
+            <Text style={styles.clearSearchText}>Clear</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Post Win Button */}
       <TouchableOpacity 
         style={styles.postWinButton}
         onPress={() => setShowPostModal(true)}
@@ -658,58 +843,85 @@ const EditorUpdatesScreen = () => {
       >
         {activeTab === 'updates' ? (
           <View style={styles.updatesContainer}>
-            {updates.length > 0 ? (
-              updates.map(update => renderUpdateCard(update))
+            {filteredUpdates.length > 0 ? (
+              filteredUpdates.map(update => renderUpdateCard(update))
             ) : (
               <View style={styles.emptyContainer}>
                 <Ionicons name="newspaper-outline" size={64} color="#cbd5e1" />
-                <Text style={styles.emptyText}>No updates yet</Text>
-                <Text style={styles.emptySubtext}>Check back soon for announcements</Text>
+                <Text style={styles.emptyText}>
+                  {searchQuery ? 'No matching updates found' : 'No updates yet'}
+                </Text>
+                <Text style={styles.emptySubtext}>
+                  {searchQuery ? 'Try a different search term' : 'Check back soon for announcements'}
+                </Text>
+                {searchQuery && (
+                  <TouchableOpacity 
+                    style={styles.emptyPostButton}
+                    onPress={handleClearSearch}
+                  >
+                    <Text style={styles.emptyPostButtonText}>Clear Search</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
           </View>
         ) : (
           <View style={styles.winsContainer}>
-            {winningPosts.length > 0 ? (
-              winningPosts.map(post => renderWinningPost(post))
+            {filteredWinningPosts.length > 0 ? (
+              filteredWinningPosts.map(post => renderWinningPost(post))
             ) : (
               <View style={styles.emptyContainer}>
                 <Ionicons name="trophy-outline" size={64} color="#cbd5e1" />
-                <Text style={styles.emptyText}>No winning posts yet</Text>
-                <Text style={styles.emptySubtext}>Be the first to share your success!</Text>
-                <TouchableOpacity 
-                  style={styles.emptyPostButton}
-                  onPress={() => setShowPostModal(true)}
-                >
-                  <Text style={styles.emptyPostButtonText}>Post Your First Win</Text>
-                </TouchableOpacity>
+                <Text style={styles.emptyText}>
+                  {searchQuery ? 'No matching wins found' : 'No winning posts yet'}
+                </Text>
+                <Text style={styles.emptySubtext}>
+                  {searchQuery ? 'Try a different search term' : 'Be the first to share your success!'}
+                </Text>
+                {searchQuery ? (
+                  <TouchableOpacity 
+                    style={styles.emptyPostButton}
+                    onPress={handleClearSearch}
+                  >
+                    <Text style={styles.emptyPostButtonText}>Clear Search</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity 
+                    style={styles.emptyPostButton}
+                    onPress={() => setShowPostModal(true)}
+                  >
+                    <Text style={styles.emptyPostButtonText}>Post Your First Win</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
           </View>
         )}
         
-        {/* Enhanced Info Section from File 1 */}
-        <View style={styles.infoSection}>
-          <Text style={styles.sectionTitle}>Community Guidelines</Text>
-          <View style={styles.guidelinesCard}>
-            <View style={styles.guidelineItem}>
-              <Ionicons name="checkmark-circle" size={20} color="#10b981" />
-              <Text style={styles.guidelineText}>Share genuine winning results</Text>
-            </View>
-            <View style={styles.guidelineItem}>
-              <Ionicons name="checkmark-circle" size={20} color="#10b981" />
-              <Text style={styles.guidelineText}>Respect other community members</Text>
-            </View>
-            <View style={styles.guidelineItem}>
-              <Ionicons name="checkmark-circle" size={20} color="#10b981" />
-              <Text style={styles.guidelineText}>No spam or promotional content</Text>
-            </View>
-            <View style={styles.guidelineItem}>
-              <Ionicons name="checkmark-circle" size={20} color="#10b981" />
-              <Text style={styles.guidelineText}>Celebrate each other's success</Text>
+        {/* Community Guidelines */}
+        {!searchQuery && (
+          <View style={styles.infoSection}>
+            <Text style={styles.sectionTitle}>Community Guidelines</Text>
+            <View style={styles.guidelinesCard}>
+              <View style={styles.guidelineItem}>
+                <Ionicons name="checkmark-circle" size={20} color="#10b981" />
+                <Text style={styles.guidelineText}>Share genuine winning results</Text>
+              </View>
+              <View style={styles.guidelineItem}>
+                <Ionicons name="checkmark-circle" size={20} color="#10b981" />
+                <Text style={styles.guidelineText}>Respect other community members</Text>
+              </View>
+              <View style={styles.guidelineItem}>
+                <Ionicons name="checkmark-circle" size={20} color="#10b981" />
+                <Text style={styles.guidelineText}>No spam or promotional content</Text>
+              </View>
+              <View style={styles.guidelineItem}>
+                <Ionicons name="checkmark-circle" size={20} color="#10b981" />
+                <Text style={styles.guidelineText}>Celebrate each other's success</Text>
+              </View>
             </View>
           </View>
-        </View>
+        )}
         
         <View style={styles.footer}>
           <Text style={styles.footerText}>Community Hub • v1.3.0</Text>
@@ -717,7 +929,7 @@ const EditorUpdatesScreen = () => {
         </View>
       </ScrollView>
 
-      {/* Post Win Modal - Enhanced from File 1 */}
+      {/* Post Win Modal */}
       <Modal
         visible={showPostModal}
         animationType="slide"
@@ -835,7 +1047,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
-    backgroundColor: '#0f172a', // Added solid background
+    backgroundColor: '#0f172a',
   },
   headerTop: {
     flexDirection: 'row',
@@ -876,6 +1088,101 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
   },
+  // Search styles
+  searchContainer: {
+    marginBottom: 16,
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 48,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    color: 'white',
+    fontSize: 16,
+    paddingVertical: 8,
+  },
+  clearButton: {
+    padding: 4,
+  },
+  searchButton: {
+    backgroundColor: '#3b82f6',
+    borderRadius: 8,
+    padding: 8,
+    marginLeft: 8,
+  },
+  searchResultsInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginTop: -10,
+    marginBottom: 10,
+    borderRadius: 12,
+  },
+  searchResultsText: {
+    fontSize: 14,
+    color: '#cbd5e1',
+    fontWeight: '600',
+  },
+  clearSearchText: {
+    fontSize: 14,
+    color: '#3b82f6',
+    fontWeight: '600',
+  },
+  // Search History styles
+  historyOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-start',
+    paddingTop: 200,
+  },
+  historyContainer: {
+    backgroundColor: '#1e293b',
+    marginHorizontal: 20,
+    borderRadius: 12,
+    maxHeight: 300,
+  },
+  historyHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+  },
+  historyTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  clearHistoryText: {
+    fontSize: 14,
+    color: '#ef4444',
+  },
+  historyItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+  },
+  historyText: {
+    fontSize: 16,
+    color: '#cbd5e1',
+    marginLeft: 12,
+  },
+  // Existing styles with some additions
   tabsContainer: {
     flexDirection: 'row',
     backgroundColor: 'rgba(255,255,255,0.1)',
@@ -916,8 +1223,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 16,
     borderRadius: 15,
-    // Moved shadow here with solid background
-    backgroundColor: '#3b82f6', // Added solid fallback color
+    backgroundColor: '#3b82f6',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
@@ -932,19 +1238,19 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
-    backgroundColor: '#0f172a', // Added background for shadow efficiency
+    backgroundColor: '#0f172a',
   },
   updatesContainer: {
     padding: 16,
-    backgroundColor: '#0f172a', // Added background
+    backgroundColor: '#0f172a',
   },
   winsContainer: {
     padding: 16,
-    backgroundColor: '#0f172a', // Added background
+    backgroundColor: '#0f172a',
   },
   updateCardWrapper: {
     marginBottom: 16,
-    backgroundColor: '#0f172a', // Added background for shadow efficiency
+    backgroundColor: '#0f172a',
   },
   updateCard: {
     backgroundColor: '#1e293b',
@@ -963,7 +1269,7 @@ const styles = StyleSheet.create({
   updateHeaderGradient: {
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1e293b', // Added solid fallback
+    backgroundColor: '#1e293b',
   },
   updateHeader: {
     flexDirection: 'row',
@@ -1006,11 +1312,11 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 12,
     right: 12,
-    backgroundColor: '#1e293b', // Added background
+    backgroundColor: '#1e293b',
   },
   winCardWrapper: {
     marginBottom: 16,
-    backgroundColor: '#0f172a', // Changed to match parent background
+    backgroundColor: '#0f172a',
   },
   winCard: {
     backgroundColor: 'white',
@@ -1018,7 +1324,6 @@ const styles = StyleSheet.create({
     padding: 20,
     borderWidth: 1,
     borderColor: '#e5e7eb',
-    // Consolidated shadow from winCardWrapper to winCard
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
@@ -1052,7 +1357,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    backgroundColor: '#3b82f6', // Added background
+    backgroundColor: '#3b82f6',
   },
   sportText: {
     fontSize: 12,
@@ -1096,7 +1401,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginRight: 20,
-    backgroundColor: 'transparent', // Explicitly set
+    backgroundColor: 'transparent',
   },
   likeText: {
     fontSize: 14,
@@ -1107,7 +1412,7 @@ const styles = StyleSheet.create({
   commentButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'transparent', // Explicitly set
+    backgroundColor: 'transparent',
   },
   commentText: {
     fontSize: 14,
@@ -1118,7 +1423,7 @@ const styles = StyleSheet.create({
   infoSection: {
     paddingHorizontal: 16,
     marginBottom: 24,
-    backgroundColor: '#0f172a', // Added background
+    backgroundColor: '#0f172a',
   },
   sectionTitle: {
     fontSize: 20,
@@ -1143,7 +1448,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
-    backgroundColor: 'transparent', // Explicitly set
+    backgroundColor: 'transparent',
   },
   guidelineText: {
     fontSize: 15,
@@ -1156,7 +1461,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderTopWidth: 1,
     borderTopColor: '#334155',
-    backgroundColor: '#0f172a', // Added background
+    backgroundColor: '#0f172a',
   },
   footerText: {
     fontSize: 14,
@@ -1235,7 +1540,7 @@ const styles = StyleSheet.create({
     padding: 20,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    backgroundColor: '#3b82f6', // Added background for modal header
+    backgroundColor: '#3b82f6',
   },
   modalTitle: {
     fontSize: 24,
@@ -1244,7 +1549,7 @@ const styles = StyleSheet.create({
   },
   modalCloseButton: {
     padding: 4,
-    backgroundColor: 'transparent', // Explicitly set
+    backgroundColor: 'transparent',
   },
   modalBody: {
     padding: 20,
@@ -1252,7 +1557,7 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     marginBottom: 20,
-    backgroundColor: 'transparent', // Explicitly set
+    backgroundColor: 'transparent',
   },
   inputLabel: {
     fontSize: 16,
@@ -1275,7 +1580,7 @@ const styles = StyleSheet.create({
   },
   sportScroll: {
     flexDirection: 'row',
-    backgroundColor: 'transparent', // Explicitly set
+    backgroundColor: 'transparent',
   },
   sportOption: {
     paddingHorizontal: 16,
@@ -1318,4 +1623,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default EditorUpdatesScreen; // ✅ CORRECT - export the component
+export default EditorUpdatesScreen;

@@ -1,4 +1,4 @@
-// src/screens/PlayerStatsScreen-enhanced-FIXED.js
+// src/screens/PlayerStatsScreen.js
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -20,9 +20,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logEvent, logScreenView } from '../utils/analytics';
+import { playerApi } from '../services/api';
+import { samplePlayers } from '../data/players';
+import { teams } from '../data/teams';
+import { useSearch } from '../providers/SearchProvider';
 
 // ==================== ANALYTICS SETUP ====================
-// Keep the local logging function for AsyncStorage, but we'll also use the imported ones
 const logAnalyticsEventLocal = async (eventName, eventParams = {}) => {
   try {
     const eventData = {
@@ -448,10 +451,14 @@ export default function PlayerStatsScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [players, setPlayers] = useState([]);
+  const [realPlayers, setRealPlayers] = useState([]);
+  const [useBackend, setUseBackend] = useState(true);
+  const [backendError, setBackendError] = useState(null);
   const [filter, setFilter] = useState('all');
   const [searchInput, setSearchInput] = useState('');
   const [selectedSport, setSelectedSport] = useState('NFL');
   const [selectedPlayer, setSelectedPlayer] = useState(null);
+  const [selectedTeam, setSelectedTeam] = useState('all');
   const [showPrompts, setShowPrompts] = useState(true);
   const [advancedMetrics, setAdvancedMetrics] = useState({});
   const [showAdvancedMetricsModal, setShowAdvancedMetricsModal] = useState(false);
@@ -459,6 +466,9 @@ export default function PlayerStatsScreen({ navigation }) {
   
   const entitlement = useSimpleEntitlement();
   const premium = usePremiumAccess();
+
+  // INTEGRATION: Use our custom search history hook
+  const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();
 
   // Enhanced advanced stats calculation
   const calculateAdvancedMetrics = (player) => {
@@ -581,176 +591,176 @@ export default function PlayerStatsScreen({ navigation }) {
     { id: 'MLB', name: 'MLB', icon: 'baseball', color: '#ca8a04' },
   ];
 
-  // Sample players data
-  const samplePlayers = {
-    NFL: [
-      {
-        id: 1,
-        name: 'Patrick Mahomes',
-        team: 'Kansas City Chiefs',
-        position: 'QB',
-        number: 15,
-        age: 28,
-        height: "6'3\"",
-        weight: '225 lbs',
-        stats: {
-          games: 16,
-          passingYards: 4250,
-          passingTDs: 35,
-          interceptions: 12,
-          rating: 105.2,
-          completion: 67.2,
-          sacks: 24,
-          rushingYards: 389,
-          rushingTDs: 4,
-          passingAttempts: 560,
-          completions: 378,
-          fumbles: 5,
-          rushingAttempts: 65,
-          totalTDs: 39,
-          yardsPerAttempt: 7.6,
-          qbr: 74.3,
-          passerRating: 105.2,
-        },
-        trend: 'up',
-        fantasyPoints: 385.5,
-        salary: '$45.0M',
-        contract: '10 years',
-        highlights: ['Super Bowl MVP', 'Passing yards leader', '4th quarter comeback specialist'],
-        isPremium: false,
-      },
-      {
-        id: 2,
-        name: 'Justin Jefferson',
-        team: 'Minnesota Vikings',
-        position: 'WR',
-        number: 18,
-        age: 24,
-        height: "6'1\"",
-        weight: '195 lbs',
-        stats: {
-          games: 17,
-          receptions: 108,
-          receivingYards: 1809,
-          receivingTDs: 12,
-          targets: 164,
-          yardsPerReception: 16.8,
-          longestReception: 64,
-          fumbles: 2,
-          rushingYards: 45,
-          rushingAttempts: 8,
-          rushingTDs: 0,
-          fantasyPoints: 285.4,
-          yardsAfterCatch: 587,
-          firstDowns: 78,
-        },
-        trend: 'up',
-        fantasyPoints: 285.4,
-        salary: '$28.0M',
-        contract: '4 years',
-        highlights: ['Receiving yards leader', 'Pro Bowl selection', 'Multiple 100+ yard games'],
-        isPremium: true,
-      },
-    ],
-    NBA: [
-      {
-        id: 6,
-        name: 'LeBron James',
-        team: 'Los Angeles Lakers',
-        position: 'SF/PF',
-        number: 23,
-        age: 39,
-        height: "6'9\"",
-        weight: '250 lbs',
-        stats: {
-          games: 55,
-          points: 28.9,
-          rebounds: 8.3,
-          assists: 6.8,
-          steals: 1.3,
-          blocks: 0.6,
-          turnovers: 3.2,
-          fgPercentage: 54.2,
-          threePercentage: 40.5,
-          ftPercentage: 76.5,
-          minutes: 35.4,
-          plusMinus: 7.2,
-          fgAttempts: 19.2,
-          fgMade: 10.4,
-          threeAttempts: 6.1,
-          threeMade: 2.5,
-          ftAttempts: 5.8,
-          ftMade: 4.4,
-          offensiveRebounds: 1.4,
-          defensiveRebounds: 6.9,
-          fouls: 1.8,
-          doubleDoubles: 18,
-        },
-        trend: 'up',
-        fantasyPoints: 45.2,
-        salary: '$44.5M',
-        contract: '2 years',
-        highlights: ['Triple-double in last game', 'Season-high 42 points', 'All-Star selection'],
-        isPremium: true,
-      },
-    ],
-  };
+  // Add this state for controlling when to actually search
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const loadPlayers = useCallback(async (isRefresh = false) => {
-    try {
-      if (!isRefresh) setLoading(true);
-      
-      await logEvent('player_stats_data_load', {
-        sport: selectedSport,
-        filter: filter,
-        has_entitlement: entitlement.isActive,
-        has_premium: premium.hasAccess,
+  // ADDED: filterSamplePlayers function (replaces old loadPlayers logic)
+  const filterSamplePlayers = useCallback((searchQuery = '', positionFilter = 'all', teamFilter = 'all') => {
+    const sportPlayers = samplePlayers[selectedSport] || [];
+    
+    let filteredPlayers = sportPlayers;
+    
+    // Apply position filter
+    if (positionFilter !== 'all') {
+      filteredPlayers = filteredPlayers.filter(player => {
+        if (selectedSport === 'NFL' || selectedSport === 'MLB') {
+          return player.position === positionFilter;
+        } else {
+          return player.position.includes(positionFilter) || player.position.split('/').includes(positionFilter);
+        }
       });
-      
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
-      const sportPlayers = samplePlayers[selectedSport] || [];
-      
-      let filteredPlayers = sportPlayers;
-      if (filter !== 'all') {
-        filteredPlayers = sportPlayers.filter(player => {
-          if (selectedSport === 'NFL' || selectedSport === 'MLB') {
-            return player.position === filter;
-          } else {
-            return player.position.includes(filter) || player.position.split('/').includes(filter);
-          }
-        });
-      }
-      
-      if (searchInput.trim()) {
-        const searchLower = searchInput.toLowerCase();
-        filteredPlayers = filteredPlayers.filter(player =>
-          player.name.toLowerCase().includes(searchLower) ||
-          player.team.toLowerCase().includes(searchLower) ||
-          player.position.toLowerCase().includes(searchLower)
+    }
+    
+    // Apply team filter
+    if (teamFilter !== 'all') {
+      const team = teams[selectedSport]?.find(t => t.id === teamFilter);
+      if (team) {
+        filteredPlayers = filteredPlayers.filter(player => 
+          player.team === team.name
         );
       }
+    }
+    
+    // Apply search filter
+    if (searchQuery) {
+      const searchLower = searchQuery.toLowerCase().trim();
+      const searchKeywords = searchLower.split(/\s+/).filter(keyword => keyword.length > 0);
       
-      setPlayers(filteredPlayers);
+      filteredPlayers = filteredPlayers.filter(player => {
+        const playerName = player.name.toLowerCase();
+        const playerTeam = player.team.toLowerCase();
+        const playerPosition = player.position ? player.position.toLowerCase() : '';
+        
+        for (const keyword of searchKeywords) {
+          const commonWords = ['player', 'players', 'stats', 'stat', 'statistics'];
+          if (commonWords.includes(keyword)) continue;
+          
+          if (
+            playerName.includes(keyword) ||
+            playerTeam.includes(keyword) ||
+            playerPosition.includes(keyword) ||
+            playerTeam.split(' ').some(word => word.includes(keyword)) ||
+            playerName.split(' ').some(word => word.includes(keyword))
+          ) {
+            return true;
+          }
+        }
+        
+        return searchKeywords.length === 0;
+      });
+    }
+    
+    console.log(`Sample data filtered: ${filteredPlayers.length} players`);
+    return filteredPlayers;
+  }, [selectedSport]);
+
+  // ADDED: Create a new loadPlayersFromBackend function
+  const loadPlayersFromBackend = useCallback(async (searchQuery = '', positionFilter = 'all', teamFilter = 'all') => {
+    try {
+      setLoading(true);
+      setBackendError(null);
+      
+      console.log('Fetching players from backend...');
+      
+      const filters = {};
+      if (positionFilter !== 'all') {
+        filters.position = positionFilter;
+      }
+      if (teamFilter !== 'all') {
+        const team = teams[selectedSport]?.find(t => t.id === teamFilter);
+        if (team) {
+          filters.team = team.name;
+        }
+      }
+      
+      let players = [];
+      
+      if (searchQuery) {
+        // Use search endpoint
+        const searchResults = await playerApi.searchPlayers(selectedSport, searchQuery, filters);
+        players = searchResults.players || searchResults;
+        console.log(`Backend search found ${players.length} players for "${searchQuery}"`);
+      } else {
+        // Get all players with optional position filter
+        const allPlayers = await playerApi.getPlayers(selectedSport, filters);
+        players = allPlayers.players || allPlayers;
+        console.log(`Backend returned ${players.length} players for ${selectedSport}`);
+      }
+      
+      // If no results from backend and we should fallback to sample data
+      if ((!players || players.length === 0) && process.env.EXPO_PUBLIC_FALLBACK_TO_SAMPLE === 'true') {
+        console.log('No results from backend, falling back to sample data');
+        players = filterSamplePlayers(searchQuery, positionFilter, teamFilter);
+      }
+      
+      setRealPlayers(players);
+      setPlayers(players);
       
     } catch (error) {
-      console.error('Error loading player stats:', error);
-      await logEvent('player_stats_load_error', {
-        error: error.message,
-        sport: selectedSport,
-      });
+      console.error('Error loading players from backend:', error);
+      setBackendError(error.message);
+      
+      // Fallback to sample data if backend fails
+      if (process.env.EXPO_PUBLIC_FALLBACK_TO_SAMPLE === 'true') {
+        console.log('Backend failed, falling back to sample data');
+        const players = filterSamplePlayers(searchQuery, positionFilter, teamFilter);
+        setRealPlayers(players);
+        setPlayers(players);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [selectedSport, filter, searchInput]);
+  }, [selectedSport, filterSamplePlayers]);
 
-  useEffect(() => {
-    loadPlayers();
+  // UPDATED: Fixed loadPlayers function to use backend
+  const loadPlayers = useCallback(async (isRefresh = false) => {
+    if (!isRefresh) setLoading(true);
     
-    // Log screen view on mount
+    await logEvent('player_stats_data_load', {
+      sport: selectedSport,
+      filter: filter,
+      has_entitlement: entitlement.isActive,
+      has_premium: premium.hasAccess,
+    });
+    
+    if (useBackend && process.env.EXPO_PUBLIC_USE_BACKEND === 'true') {
+      await loadPlayersFromBackend(searchQuery, filter, selectedTeam);
+    } else {
+      // Use sample data only
+      const players = filterSamplePlayers(searchQuery, filter, selectedTeam);
+      setPlayers(players);
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [useBackend, searchQuery, filter, selectedTeam, loadPlayersFromBackend, filterSamplePlayers]);
+
+  // ADDED: useEffect for initial load
+  useEffect(() => {
+    const initializeData = async () => {
+      try {
+        // Check if backend is available
+        const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/health`);
+        if (response.ok) {
+          setUseBackend(true);
+          await loadPlayers();
+        } else {
+          setUseBackend(false);
+          console.log('Backend not available, using sample data');
+          const players = filterSamplePlayers('', 'all', 'all');
+          setPlayers(players);
+        }
+      } catch (error) {
+        console.log('Backend check failed, using sample data:', error.message);
+        setUseBackend(false);
+        const players = filterSamplePlayers('', 'all', 'all');
+        setPlayers(players);
+      }
+    };
+    
+    initializeData();
     logScreenView('PlayerStatsScreen');
-  }, [loadPlayers]);
+  }, []);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -770,7 +780,9 @@ export default function PlayerStatsScreen({ navigation }) {
     setSelectedSport(sportId);
     setSelectedPlayer(null);
     setFilter('all');
+    setSelectedTeam('all'); // Reset team filter when changing sports
     setSearchInput('');
+    setSearchQuery('');
   };
 
   const handlePlayerSelect = async (player) => {
@@ -788,17 +800,56 @@ export default function PlayerStatsScreen({ navigation }) {
     });
   };
 
+  // UPDATED: Fixed handleSearch function - Only updates text state, doesn't search on every keystroke
   const handleSearch = (text) => {
     setSearchInput(text);
-    if (text.trim()) {
+    // DON'T add to history or trigger load on every keystroke
+  };
+
+  // UPDATED: Handle search submission (when user presses enter or search button)
+  const handleSearchSubmit = async () => {
+    const query = searchInput.trim();
+    if (query) {
+      // Log the search
       logEvent('player_stats_search', {
-        query: text,
+        query: query,
         sport: selectedSport,
         filter: filter,
       });
+      
+      // Add to search history
+      if (addToSearchHistory && typeof addToSearchHistory === 'function') {
+        await addToSearchHistory(query);
+      } else {
+        console.warn('addToSearchHistory is not available, using fallback');
+        // Fallback implementation
+        try {
+          const storedHistory = JSON.parse(await AsyncStorage.getItem('searchHistory') || '[]');
+          const updatedHistory = [
+            query,
+            ...storedHistory.filter(item => item.toLowerCase() !== query.toLowerCase())
+          ].slice(0, 10);
+          await AsyncStorage.setItem('searchHistory', JSON.stringify(updatedHistory));
+        } catch (error) {
+          console.error('Error storing search history locally:', error);
+        }
+      }
+      
+      // Set the search query to trigger the actual search
+      setSearchQuery(query);
+      setLoading(true);
     }
   };
 
+  // UPDATED: Clear search to clear both searchInput and searchQuery
+  const handleClearSearch = () => {
+    setSearchInput('');
+    setSearchQuery('');
+    setLoading(true);
+    loadPlayers(true);
+  };
+
+  // UPDATED: Handle filter change to reset search for better UX
   const handleFilterChange = async (newFilter) => {
     await logEvent('player_stats_filter_change', {
       from_filter: filter,
@@ -806,6 +857,14 @@ export default function PlayerStatsScreen({ navigation }) {
       sport: selectedSport,
     });
     setFilter(newFilter);
+    // Clear search when changing filters for better UX
+    setSearchQuery('');
+    setSearchInput('');
+  };
+
+  // ADDED: Handle team change
+  const handleTeamChange = (teamId) => {
+    setSelectedTeam(teamId);
   };
 
   const handlePlayerProfileNavigation = async (player) => {
@@ -838,6 +897,82 @@ export default function PlayerStatsScreen({ navigation }) {
     
     navigation.navigate('PlayerProfile', profileData);
   };
+
+  // INTEGRATION: Handle search result selection
+  const handleSearchResultSelect = (item) => {
+    // Handle the search result in current screen
+    console.log('Selected player from search:', item);
+    
+    // Update state to show details, don't navigate
+    handlePlayerSelect(item);
+  };
+
+  // INTEGRATION: Render recent searches
+  const renderRecentSearches = () => {
+    if (searchHistory.length === 0 || searchInput || !showPrompts) return null;
+    
+    return (
+      <View style={styles.recentSearchesContainer}>
+        <View style={styles.recentSearchesHeader}>
+          <Text style={styles.recentSearchesTitle}>Recent Searches</Text>
+          <TouchableOpacity onPress={clearSearchHistory}>
+            <Text style={styles.clearHistoryText}>Clear</Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.recentSearchesList}>
+          {searchHistory.map((search, index) => (
+            <TouchableOpacity
+              key={index}
+              style={styles.recentSearchItem}
+              onPress={() => {
+                setSearchInput(search); // Set the search text
+                // Automatically submit the search
+                setTimeout(() => {
+                  handleSearchSubmit();
+                }, 100);
+              }}
+            >
+              <Ionicons name="time" size={14} color="#94a3b8" />
+              <Text style={styles.recentSearchText}>{search}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+    );
+  };
+
+  // ADDED: Team selector component
+  const renderTeamSelector = () => (
+    <View style={styles.teamSection}>
+      <Text style={styles.teamSectionTitle}>Filter by Team</Text>
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false}
+        style={styles.teamSelector}
+      >
+        <TouchableOpacity
+          style={[styles.teamPill, selectedTeam === 'all' && styles.activeTeamPill]}
+          onPress={() => handleTeamChange('all')}
+        >
+          <Text style={[styles.teamText, selectedTeam === 'all' && styles.activeTeamText]}>
+            All Teams
+          </Text>
+        </TouchableOpacity>
+        
+        {teams[selectedSport]?.map(team => (
+          <TouchableOpacity
+            key={team.id}
+            style={[styles.teamPill, selectedTeam === team.id && styles.activeTeamPill]}
+            onPress={() => handleTeamChange(team.id)}
+          >
+            <Text style={[styles.teamText, selectedTeam === team.id && styles.activeTeamText]}>
+              {team.name.split(' ').pop()} {/* Show just last name */}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
 
   // Advanced metrics modal
   const renderAdvancedMetricsModal = () => (
@@ -1136,7 +1271,7 @@ export default function PlayerStatsScreen({ navigation }) {
           styles.playerCard,
           selectedPlayer?.id === item.id && styles.selectedPlayerCard
         ]}
-        onPress={() => handlePlayerSelect(item)}
+        onPress={() => handleSearchResultSelect(item)}
       >
         <View style={styles.playerHeader}>
           <View style={styles.playerInfo}>
@@ -1197,7 +1332,7 @@ export default function PlayerStatsScreen({ navigation }) {
           <View style={styles.playerActions}>
             <TouchableOpacity 
               style={[styles.actionButton, styles.statsButton]}
-              onPress={() => handlePlayerSelect(item)}
+              onPress={() => handleSearchResultSelect(item)}
             >
               <Ionicons name="stats-chart" size={12} color="#3b82f6" />
               <Text style={styles.actionButtonText}>Stats</Text>
@@ -1250,7 +1385,16 @@ export default function PlayerStatsScreen({ navigation }) {
           </View>
         </View>
 
-        {/* Sport Selector - Moved ABOVE search for better visibility */}
+        {/* ADDED: Backend error display */}
+        {backendError && (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>
+              Backend Error: {backendError}. Using sample data.
+            </Text>
+          </View>
+        )}
+
+        {/* Sport Selector */}
         <View style={styles.sportSection}>
           <Text style={styles.sportSectionTitle}>Select Sport</Text>
           <ScrollView 
@@ -1284,7 +1428,7 @@ export default function PlayerStatsScreen({ navigation }) {
           </ScrollView>
         </View>
 
-        {/* Search Bar - Moved below sport selector */}
+        {/* Search Bar with all updates */}
         <View style={styles.searchContainer}>
           <View style={styles.searchBox}>
             <Ionicons name="search" size={18} color="#94a3b8" style={styles.searchIcon} />
@@ -1293,25 +1437,32 @@ export default function PlayerStatsScreen({ navigation }) {
               placeholder={`Search ${selectedSport} players, teams, stats...`}
               placeholderTextColor="#64748b"
               value={searchInput}
-              onChangeText={handleSearch}
-              onSubmitEditing={() => loadPlayers(true)}
+              onChangeText={handleSearch} // Only updates the text, doesn't search
+              onSubmitEditing={handleSearchSubmit} // Searches when user presses enter
+              returnKeyType="search"
             />
             {searchInput ? (
-              <TouchableOpacity onPress={() => setSearchInput('')}>
+              <TouchableOpacity onPress={handleClearSearch}>
                 <Ionicons name="close-circle" size={18} color="#94a3b8" />
               </TouchableOpacity>
             ) : null}
           </View>
           <TouchableOpacity 
             style={styles.searchButton}
-            onPress={() => loadPlayers(true)}
+            onPress={handleSearchSubmit} // Calls the submit function
           >
             <Ionicons name="arrow-forward" size={18} color="#fff" />
           </TouchableOpacity>
         </View>
 
+        {/* Recent Searches */}
+        {renderRecentSearches()}
+
         {/* Search Prompts with improved examples */}
         {renderSearchPrompts()}
+
+        {/* ADDED: Team Selector */}
+        {renderTeamSelector()}
 
         {/* Position Filters */}
         <View style={styles.filterSection}>
@@ -1409,6 +1560,7 @@ export default function PlayerStatsScreen({ navigation }) {
   );
 }
 
+// Add new styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1465,6 +1617,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 4,
   },
+  // ADDED: Error styles
+  errorContainer: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    margin: 16,
+  },
+  errorText: {
+    color: '#dc2626',
+    fontSize: 12,
+  },
   // Sport section above search for better visibility
   sportSection: {
     paddingTop: 12,
@@ -1498,7 +1663,7 @@ const styles = StyleSheet.create({
   },
   activeSportButton: {
     borderWidth: 0,
-    backgroundColor: '#334155', // FIXED: Added solid background color
+    backgroundColor: '#334155',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
@@ -1549,6 +1714,49 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  recentSearchesContainer: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: '#1e293b',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    padding: 12,
+  },
+  recentSearchesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  recentSearchesTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#94a3b8',
+  },
+  clearHistoryText: {
+    fontSize: 12,
+    color: '#ef4444',
+  },
+  recentSearchesList: {
+    flexDirection: 'row',
+  },
+  recentSearchItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  recentSearchText: {
+    fontSize: 12,
+    color: '#cbd5e1',
+    marginLeft: 4,
   },
   // Improved prompts styles
   promptsContainer: {
@@ -1628,6 +1836,40 @@ const styles = StyleSheet.create({
     color: '#bbf7d0',
     marginLeft: 8,
     flex: 1,
+  },
+  // ADDED: Team selector styles
+  teamSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#1e293b',
+  },
+  teamSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#94a3b8',
+    marginBottom: 8,
+  },
+  teamSelector: {
+    height: 40,
+  },
+  teamPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#334155',
+    marginRight: 8,
+  },
+  activeTeamPill: {
+    backgroundColor: '#3b82f6',
+  },
+  teamText: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  activeTeamText: {
+    color: '#fff',
+    fontWeight: 'bold',
   },
   // Filter section
   filterSection: {
@@ -1831,7 +2073,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 12,
     marginLeft: 6,
-    backgroundColor: '#334155', // FIXED: Added default background color
+    backgroundColor: '#334155',
   },
   statsButton: {
     backgroundColor: '#1e3a8a',
@@ -2080,4 +2322,3 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 });
-

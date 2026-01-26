@@ -7,7 +7,7 @@ const logScreenView = async (screenName) => {
   console.log(`📱 Screen View: ${screenName}`);
 };
 
-// src/screens/LiveGamesScreen.js - COMPLETE WORKING VERSION
+// src/screens/LiveGamesScreen.js - UPDATED VERSION
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -23,13 +23,15 @@ import {
   Alert,
   SafeAreaView,
   FlatList,
-  StatusBar
+  StatusBar,
+  TextInput
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import SearchBar from '../components/SearchBar';
-import { useSearch } from '../providers/SearchProvider'; // This should already be correct
+import { useSearch } from '../providers/SearchProvider';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 
 const { width } = Dimensions.get('window');
 
@@ -57,7 +59,7 @@ const getGameStatus = (game) => {
 };
 
 // Main Component
-export default function LiveGamesScreen({ navigation }) {
+export default function LiveGamesScreen({ navigation, route }) { // Added route prop from Fix 3
   const [selectedSport, setSelectedSport] = useState('all');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -67,8 +69,14 @@ export default function LiveGamesScreen({ navigation }) {
   const [liveUpdates, setLiveUpdates] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredGames, setFilteredGames] = useState([]);
+  const [selectedGame, setSelectedGame] = useState(null);
   
-  const { searchHistory, addToSearchHistory } = useSearch();
+  // Added from Fix 1
+  const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();
+  
+  // Updated search states from Fix 2
+  const [searchInput, setSearchInput] = useState('');
+  
   const sports = ['all', 'NBA', 'NFL', 'NHL', 'MLB'];
 
   // Enhanced mock data with more realistic live games for each sport
@@ -428,6 +436,20 @@ export default function LiveGamesScreen({ navigation }) {
     logScreenView('LiveGamesScreen');
   }, []);
 
+  // Handle navigation params from Fix 3
+  useFocusEffect(
+    useCallback(() => {
+      if (route.params?.initialSearch) {
+        setSearchInput(route.params.initialSearch);
+        setSearchQuery(route.params.initialSearch);
+        handleSearchSubmit(route.params.initialSearch);
+      }
+      if (route.params?.initialSport) {
+        setSelectedSport(route.params.initialSport);
+      }
+    }, [route.params])
+  );
+
   useEffect(() => {
     // Start pulse animation
     Animated.loop(
@@ -470,7 +492,98 @@ export default function LiveGamesScreen({ navigation }) {
     return () => clearInterval(updateInterval);
   }, [selectedSport]);
 
-  const loadLiveGames = useCallback(async (isRefresh = false) => {
+  // Enhanced search functionality from Fix 4
+  const searchGames = (games, searchText) => {
+    if (!searchText.trim()) return games;
+
+    const searchLower = searchText.toLowerCase().trim();
+    const searchKeywords = searchLower.split(/\s+/).filter(keyword => keyword.length > 0);
+    
+    console.log(`Searching for: "${searchLower}" in ${games.length} games`);
+
+    // First, try exact search for team names
+    let teamSearchResults = [];
+    if (searchKeywords.length >= 2) {
+      const possibleTeamName = searchKeywords.join(' ');
+      teamSearchResults = games.filter(game => 
+        game.awayTeam.toLowerCase().includes(possibleTeamName) ||
+        game.homeTeam.toLowerCase().includes(possibleTeamName)
+      );
+      console.log(`Team search for "${possibleTeamName}": ${teamSearchResults.length} results`);
+    }
+
+    if (teamSearchResults.length > 0) {
+      return teamSearchResults;
+    }
+
+    // Search by keywords
+    let filtered = games.filter(game => {
+      const gameName = `${game.awayTeam} ${game.homeTeam}`.toLowerCase();
+      const gameArena = (game.arena || game.stadium || '').toLowerCase();
+      const gameSport = game.sport.toLowerCase();
+      const gameChannel = (game.channel || '').toLowerCase();
+      const gameBroadcast = (game.broadcast?.network || '').toLowerCase();
+
+      for (const keyword of searchKeywords) {
+        const commonWords = ['game', 'games', 'live', 'score', 'scores', 'stats', 'statistics'];
+        if (commonWords.includes(keyword)) {
+          continue;
+        }
+
+        if (
+          gameName.includes(keyword) ||
+          gameArena.includes(keyword) ||
+          gameSport.includes(keyword) ||
+          gameChannel.includes(keyword) ||
+          gameBroadcast.includes(keyword) ||
+          gameName.split(' ').some(word => word.includes(keyword)) ||
+          gameArena.split(' ').some(word => word.includes(keyword))
+        ) {
+          return true;
+        }
+      }
+
+      // If all keywords were common words, show the game
+      const nonCommonKeywords = searchKeywords.filter(kw => 
+        !['game', 'games', 'live', 'score', 'scores', 'stats', 'statistics'].includes(kw)
+      );
+
+      if (nonCommonKeywords.length === 0) {
+        return true;
+      }
+
+      return false;
+    });
+
+    // If no results, try fuzzy matching
+    if (filtered.length === 0 && searchKeywords.length > 0) {
+      const nonCommonKeywords = searchKeywords.filter(kw => 
+        !['game', 'games', 'live', 'score', 'scores', 'stats', 'statistics'].includes(kw)
+      );
+
+      if (nonCommonKeywords.length > 0) {
+        const mainKeyword = nonCommonKeywords[0];
+        filtered = games.filter(game => {
+          const gameName = `${game.awayTeam} ${game.homeTeam}`.toLowerCase();
+          const gameArena = (game.arena || game.stadium || '').toLowerCase();
+          const gameSport = game.sport.toLowerCase();
+
+          return (
+            gameName.includes(mainKeyword) ||
+            gameArena.includes(mainKeyword) ||
+            gameSport.includes(mainKeyword) ||
+            gameName.split(' ').some(word => word.startsWith(mainKeyword.substring(0, 3))) ||
+            gameArena.split(' ').some(word => word.startsWith(mainKeyword.substring(0, 3)))
+          );
+        });
+      }
+    }
+
+    console.log(`Found ${filtered.length} games after search`);
+    return filtered;
+  };
+
+  const loadLiveGames = useCallback(async (isRefresh = false, searchText = '') => {
     try {
       if (!isRefresh) setLoading(true);
       
@@ -479,6 +592,11 @@ export default function LiveGamesScreen({ navigation }) {
       
       // Get games based on selected sport
       let games = mockGamesData[selectedSport] || [];
+      
+      // Apply search filter if provided
+      if (searchText) {
+        games = searchGames(games, searchText);
+      }
       
       setLiveGames(games);
       setFilteredGames(games);
@@ -507,32 +625,26 @@ export default function LiveGamesScreen({ navigation }) {
   }, [selectedSport]);
 
   useEffect(() => {
-    loadLiveGames();
-  }, [loadLiveGames]);
+    loadLiveGames(false, searchQuery);
+  }, [loadLiveGames, searchQuery]);
 
-  // Handle search functionality
+  // Handle search submit from Fix 2
+  const handleSearchSubmit = async (query = null) => {
+    const searchText = query || searchInput.trim();
+    if (searchText) {
+      await addToSearchHistory(searchText);
+      setSearchQuery(searchText);
+    }
+  };
+
   const handleSearch = (query) => {
-    setSearchQuery(query);
-    addToSearchHistory(query);
+    setSearchInput(query);
     
     if (!query.trim()) {
+      setSearchQuery('');
       setFilteredGames(liveGames);
       return;
     }
-
-    const lowerQuery = query.toLowerCase();
-    const filtered = liveGames.filter(game => {
-      return (
-        (game.awayTeam || '').toLowerCase().includes(lowerQuery) ||
-        (game.homeTeam || '').toLowerCase().includes(lowerQuery) ||
-        (game.arena || game.stadium || '').toLowerCase().includes(lowerQuery) ||
-        (game.channel || '').toLowerCase().includes(lowerQuery) ||
-        (game.broadcast?.network || '').toLowerCase().includes(lowerQuery) ||
-        (game.sport || '').toLowerCase().includes(lowerQuery)
-      );
-    });
-    
-    setFilteredGames(filtered);
   };
 
   const onRefresh = useCallback(async () => {
@@ -543,7 +655,7 @@ export default function LiveGamesScreen({ navigation }) {
     });
     
     try {
-      await loadLiveGames(true);
+      await loadLiveGames(true, searchQuery);
       // Add a new live update
       const newUpdate = {
         id: Date.now(),
@@ -555,12 +667,13 @@ export default function LiveGamesScreen({ navigation }) {
     } catch (error) {
       console.error('Refresh error:', error);
     }
-  }, [loadLiveGames, selectedSport, liveGames.length]);
+  }, [loadLiveGames, selectedSport, liveGames.length, searchQuery]);
 
   const handleSportChange = async (sport) => {
+    // Clear search when changing sports (from Fix 4)
     setSelectedSport(sport);
     setSearchQuery('');
-    setFilteredGames(mockGamesData[sport] || []);
+    setSearchInput('');
     
     // Update live updates for new sport
     setLiveUpdates(getLiveUpdatesForSport(sport));
@@ -569,6 +682,33 @@ export default function LiveGamesScreen({ navigation }) {
       from_sport: selectedSport,
       to_sport: sport,
     });
+  };
+
+  // Handle search result selection
+  const handleGameSelect = (item) => {
+    // Navigate to PlayerStats with initial search (Fix 3 integration)
+    if (item.sport === 'NBA' || item.sport === 'NFL' || item.sport === 'MLB' || item.sport === 'NHL') {
+      navigation.navigate('PlayerStats', { 
+        initialSearch: item.awayTeam.split(' ').pop() + ' ' + item.homeTeam.split(' ').pop(),
+        initialSport: item.sport 
+      });
+    } else {
+      // Show game details
+      setSelectedGame(item);
+      Alert.alert(
+        `${item.awayTeam} vs ${item.homeTeam}`,
+        `Score: ${getTeamScore(item.awayScore)} - ${getTeamScore(item.homeScore)}\nStatus: ${getGameStatus(item).toUpperCase()}\nPeriod: ${item.period || item.quarter || item.inning}\nTime: ${item.timeRemaining || '0:00'}\n\nArena: ${item.arena || item.stadium || 'N/A'}\nChannel: ${item.broadcast?.network || item.channel || 'N/A'}`,
+        [
+          { text: 'Close', style: 'cancel' },
+          { text: 'View Stats', onPress: () => {
+            Alert.alert(
+              'Detailed Statistics',
+              `${item.awayTeam}: ${getTeamScore(item.awayScore)} (${item.awayRecord || '0-0'})\n${item.homeTeam}: ${getTeamScore(item.homeScore)} (${item.homeRecord || '0-0'})\n\nLast Play: ${item.lastPlay || 'N/A'}\nAttendance: ${item.attendance || 'N/A'}\nBetting Line: ${item.bettingLine?.spread || 'N/A'}`
+            );
+          }}
+        ]
+      );
+    }
   };
 
   const renderGameStatusBadge = (game) => {
@@ -589,6 +729,39 @@ export default function LiveGamesScreen({ navigation }) {
     );
   };
 
+  // Updated search bar component from Fix 2
+  const renderSearchBar = () => (
+    <View style={styles.searchContainer}>
+      <View style={styles.searchBar}>
+        <TextInput
+          value={searchInput}
+          onChangeText={setSearchInput}
+          onSubmitEditing={() => handleSearchSubmit()}
+          placeholder="Search teams, arenas, sports..."
+          style={styles.searchInput}
+          placeholderTextColor="#94a3b8"
+          returnKeyType="search"
+        />
+        <TouchableOpacity onPress={() => handleSearchSubmit()}>
+          <Ionicons name="search" size={20} color="#3b82f6" />
+        </TouchableOpacity>
+      </View>
+      {searchQuery && (
+        <View style={styles.searchInfo}>
+          <Text style={styles.searchInfoText}>
+            Showing results for: "{searchQuery}"
+          </Text>
+          <TouchableOpacity onPress={() => {
+            setSearchQuery('');
+            setSearchInput('');
+          }}>
+            <Text style={styles.clearSearchText}>Clear</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+
   const renderGameItem = ({ item }) => {
     const status = getGameStatus(item);
     const isLive = status === 'live';
@@ -596,13 +769,7 @@ export default function LiveGamesScreen({ navigation }) {
     return (
       <TouchableOpacity 
         style={styles.gameCard}
-        onPress={() => {
-          Alert.alert(
-            `${item.awayTeam} vs ${item.homeTeam}`,
-            `${getTeamScore(item.awayScore)} - ${getTeamScore(item.homeScore)}\n\nStatus: ${status.toUpperCase()}\n${item.period || item.quarter || item.inning} • ${item.timeRemaining || '0:00'}`,
-            [{ text: 'OK' }]
-          );
-        }}
+        onPress={() => handleGameSelect(item)}
       >
         <View style={styles.gameHeader}>
           <View style={styles.sportBadge}>
@@ -681,12 +848,7 @@ export default function LiveGamesScreen({ navigation }) {
         <View style={styles.gameFooter}>
           <TouchableOpacity 
             style={styles.actionButton}
-            onPress={() => {
-              Alert.alert(
-                'Game Statistics',
-                `${item.awayTeam}: ${getTeamScore(item.awayScore)}\n${item.homeTeam}: ${getTeamScore(item.homeScore)}\n\nStatus: ${status.toUpperCase()}\nPeriod: ${item.period || item.quarter || item.inning}\nTime: ${item.timeRemaining || '0:00'}\n\nArena: ${item.arena || item.stadium || 'N/A'}\nAttendance: ${item.attendance || 'N/A'}`
-              );
-            }}
+            onPress={() => handleGameSelect(item)}
           >
             <View style={styles.actionButtonContent}>
               <Ionicons name="stats-chart" size={20} color="#3b82f6" />
@@ -788,7 +950,7 @@ export default function LiveGamesScreen({ navigation }) {
       <Ionicons name="sad-outline" size={64} color="#94a3b8" />
       <Text style={styles.emptyTitle}>No Games Found</Text>
       <Text style={styles.emptySubtitle}>
-        There are no {selectedSport === 'all' ? '' : selectedSport + ' '}games happening right now.
+        {searchQuery ? `No results for "${searchQuery}"` : `There are no ${selectedSport === 'all' ? '' : selectedSport + ' '}games happening right now.`}
       </Text>
       <Text style={styles.emptyMessage}>
         Check back later or switch to another sport.
@@ -828,17 +990,8 @@ export default function LiveGamesScreen({ navigation }) {
         <Text style={styles.subtitle}>Real-time sports action</Text>
       </View>
       
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <SearchBar
-          placeholder="Search games, teams, arenas..."
-          onSearch={handleSearch}
-          searchHistory={searchHistory}
-          style={styles.searchBar}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-      </View>
+      {/* Updated Search Bar */}
+      {renderSearchBar()}
 
       {/* Sport Filters */}
       <View style={styles.filterSection}>
@@ -902,6 +1055,15 @@ export default function LiveGamesScreen({ navigation }) {
             </Text>
           </View>
           
+          {/* Debug info from Fix 4 */}
+          {searchQuery && (
+            <View style={styles.debugContainer}>
+              <Text style={styles.debugText}>
+                Search: "{searchQuery}" • Results: {filteredGames.length}
+              </Text>
+            </View>
+          )}
+          
           {filteredGames.length > 0 ? (
             <FlatList
               data={filteredGames}
@@ -922,6 +1084,11 @@ export default function LiveGamesScreen({ navigation }) {
           <Text style={styles.infoText}>
             🔄 Auto-refreshing every 30 seconds
           </Text>
+          {searchQuery && (
+            <Text style={styles.infoSubtext}>
+              Tip: Try searching by team names like "Warriors Lakers" or arena names
+            </Text>
+          )}
         </View>
         
         <View style={styles.footer}>
@@ -972,6 +1139,50 @@ const styles = StyleSheet.create({
   },
   searchBar: {
     width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  searchInput: {
+    flex: 1,
+    color: 'white',
+    fontSize: 16,
+    paddingRight: 10,
+  },
+  searchInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 8,
+    paddingHorizontal: 4,
+  },
+  searchInfoText: {
+    color: '#94a3b8',
+    fontSize: 12,
+  },
+  clearSearchText: {
+    color: '#3b82f6',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  debugContainer: {
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.3)',
+  },
+  debugText: {
+    color: '#3b82f6',
+    fontSize: 11,
+    textAlign: 'center',
   },
   filterSection: {
     paddingHorizontal: 20,
@@ -1377,6 +1588,12 @@ const styles = StyleSheet.create({
   infoText: {
     color: '#cbd5e1',
     fontSize: 14,
+  },
+  infoSubtext: {
+    color: '#94a3b8',
+    fontSize: 12,
+    marginTop: 5,
+    fontStyle: 'italic',
   },
   footer: {
     padding: 20,

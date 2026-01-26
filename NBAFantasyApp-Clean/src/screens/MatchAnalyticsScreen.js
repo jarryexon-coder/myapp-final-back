@@ -13,12 +13,17 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
-  Animated
+  Animated,
+  TextInput
 } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import SearchBar from '../components/SearchBar';
 import { useSearch } from '../providers/SearchProvider';
+import { useFocusEffect } from '@react-navigation/native';
+import { samplePlayers } from '../data/players'; // Fix 4: Add data imports
+import { teams } from '../data/teams';
+import { statCategories } from '../data/stats';
 
 const { width, height } = Dimensions.get('window');
 
@@ -295,10 +300,14 @@ const MoreGameCard = React.memo(({ game, onPress }) => {
 MoreGameCard.displayName = 'MoreGameCard';
 
 export default function GameDetailsScreen({ navigation, route }) {
-  const { searchHistory, addToSearchHistory } = useSearch();
+  // Fix 1: Add Search History Hook
+  const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();  
+  
+  // Fix 2: Add search states
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   
   const [refreshing, setRefreshing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [filteredGames, setFilteredGames] = useState([]);
   const [selectedGame, setSelectedGame] = useState(null);
   const [showPrompts, setShowPrompts] = useState(true);
@@ -307,7 +316,29 @@ export default function GameDetailsScreen({ navigation, route }) {
   const [loadingAI, setLoadingAI] = useState(false);
   const [activeTab, setActiveTab] = useState('conditions');
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [fadeAnim] = useState(new Animated.Value(1)); // Changed from 0 to 1 for immediate visibility
+  const [fadeAnim] = useState(new Animated.Value(1));
+  
+  // Fix 4: Add team filter state
+  const [selectedTeam, setSelectedTeam] = useState('all');
+
+  // Fix 3: Handle navigation params
+  useFocusEffect(
+    useCallback(() => {
+      if (route.params?.initialSearch) {
+        setSearchInput(route.params.initialSearch);
+        setSearchQuery(route.params.initialSearch);
+        handleSearchSubmit(route.params.initialSearch);
+      }
+      if (route.params?.initialSport) {
+        // Filter games by sport if provided
+        const games = allGames.filter(game => game.sport === route.params.initialSport);
+        if (games.length > 0) {
+          setSelectedGame(games[0]);
+          setFilteredGames(games);
+        }
+      }
+    }, [route.params])
+  );
 
   // Initialize with route game or first from data
   useEffect(() => {
@@ -328,43 +359,200 @@ export default function GameDetailsScreen({ navigation, route }) {
     return games;
   }, []);
 
-  // Filter games based on search
-  useEffect(() => {
-    if (!searchQuery.trim()) {
+  // Fix 4: Enhanced search function based on loadPlayers algorithm
+  const searchGames = useCallback((searchText = '') => {
+    if (!searchText.trim()) {
+      return allGames;
+    }
+
+    const searchLower = searchText.toLowerCase().trim();
+    console.log(`Searching for: "${searchLower}" in ALL ${allGames.length} games`);
+    
+    // Split search into keywords
+    const searchKeywords = searchLower.split(/\s+/).filter(keyword => keyword.length > 0);
+    console.log('Search keywords:', searchKeywords);
+    
+    // First, try exact search for team names
+    let teamSearchResults = [];
+    if (searchKeywords.length >= 2) {
+      const possibleTeamName = searchKeywords.join(' ');
+      teamSearchResults = allGames.filter(game => {
+        const homeTeam = game.homeTeam?.name || '';
+        const awayTeam = game.awayTeam?.name || '';
+        return (
+          homeTeam.toLowerCase().includes(possibleTeamName) ||
+          awayTeam.toLowerCase().includes(possibleTeamName)
+        );
+      });
+      console.log(`Team search for "${possibleTeamName}": ${teamSearchResults.length} results`);
+    }
+    
+    let filteredGames = allGames;
+    
+    // If we found exact team matches, use those
+    if (teamSearchResults.length > 0) {
+      filteredGames = teamSearchResults;
+    } else {
+      // Otherwise, search by keywords
+      filteredGames = allGames.filter(game => {
+        const homeTeamName = (game.homeTeam?.name || '').toLowerCase();
+        const awayTeamName = (game.awayTeam?.name || '').toLowerCase();
+        const sportName = (game.sport || '').toLowerCase();
+        const venueName = (game.venue || '').toLowerCase();
+        const status = (game.status || '').toLowerCase();
+        
+        // Check each keyword
+        for (const keyword of searchKeywords) {
+          // Skip very common words that don't help
+          const commonWords = ['game', 'games', 'match', 'matches', 'vs', 'versus', 'live', 'final', 'scheduled'];
+          if (commonWords.includes(keyword)) {
+            continue;
+          }
+          
+          // Check if keyword matches any game property
+          if (
+            homeTeamName.includes(keyword) ||
+            awayTeamName.includes(keyword) ||
+            sportName.includes(keyword) ||
+            venueName.includes(keyword) ||
+            status.includes(keyword) ||
+            homeTeamName.split(' ').some(word => word.includes(keyword)) ||
+            awayTeamName.split(' ').some(word => word.includes(keyword))
+          ) {
+            console.log(`✓ Game ${homeTeamName} vs ${awayTeamName}: matched keyword "${keyword}"`);
+            return true;
+          }
+        }
+        
+        // If we have multiple keywords, require at least one match
+        if (searchKeywords.length > 0) {
+          // Check if we skipped all keywords (all were common words)
+          const nonCommonKeywords = searchKeywords.filter(kw => 
+            !['game', 'games', 'match', 'matches', 'vs', 'versus', 'live', 'final', 'scheduled'].includes(kw)
+          );
+          
+          if (nonCommonKeywords.length === 0) {
+            // If all keywords were common words, show all games
+            console.log(`Game ${homeTeamName} vs ${awayTeamName}: all keywords were common words, showing anyway`);
+            return true;
+          }
+          
+          console.log(`✗ Game ${homeTeamName} vs ${awayTeamName}: no matches`);
+          return false;
+        }
+        
+        return true;
+      });
+    }
+    
+    console.log(`Found ${filteredGames.length} games after search`);
+    
+    // If no results, try fuzzy matching on first non-common keyword
+    if (filteredGames.length === 0 && searchKeywords.length > 0) {
+      console.log('Trying fuzzy search...');
+      const nonCommonKeywords = searchKeywords.filter(kw => 
+        !['game', 'games', 'match', 'matches', 'vs', 'versus', 'live', 'final', 'scheduled'].includes(kw)
+      );
+      
+      if (nonCommonKeywords.length > 0) {
+        const mainKeyword = nonCommonKeywords[0];
+        console.log(`Fuzzy searching for: "${mainKeyword}"`);
+        
+        filteredGames = allGames.filter(game => {
+          const homeTeamName = (game.homeTeam?.name || '').toLowerCase();
+          const awayTeamName = (game.awayTeam?.name || '').toLowerCase();
+          const sportName = (game.sport || '').toLowerCase();
+          const venueName = (game.venue || '').toLowerCase();
+          
+          // Check if main keyword appears anywhere
+          const matches = 
+            homeTeamName.includes(mainKeyword) ||
+            awayTeamName.includes(mainKeyword) ||
+            sportName.includes(mainKeyword) ||
+            venueName.includes(mainKeyword) ||
+            homeTeamName.split(' ').some(word => word.startsWith(mainKeyword.substring(0, 3))) ||
+            awayTeamName.split(' ').some(word => word.startsWith(mainKeyword.substring(0, 3)));
+          
+          if (matches) {
+            console.log(`✓ Game ${homeTeamName} vs ${awayTeamName}: fuzzy matched "${mainKeyword}"`);
+          }
+          return matches;
+        });
+        
+        console.log(`Found ${filteredGames.length} games after fuzzy search`);
+      }
+    }
+    
+    return filteredGames;
+  }, [allGames]);
+
+  // Fix 2: Handle search submit
+  const handleSearchSubmit = async (query = null) => {
+    const searchText = query || searchInput.trim();
+    if (searchText) {
+      await addToSearchHistory(searchText);
+      setSearchQuery(searchText);
+      
+      // Apply search filter
+      const results = searchGames(searchText);
+      setFilteredGames(results);
+      
+      if (results.length > 0 && !selectedGame) {
+        setSelectedGame(results[0]);
+      }
+    }
+  };
+
+  const handleSearch = (query) => {
+    setSearchInput(query);
+    
+    if (!query.trim()) {
+      setSearchQuery('');
       setFilteredGames([]);
       setShowSuggestions(false);
       return;
     }
-
-    const query = searchQuery.toLowerCase();
-    const results = allGames.filter(game => {
-      const homeTeam = game.homeTeam?.name || game.homeTeam || '';
-      const awayTeam = game.awayTeam?.name || game.awayTeam || '';
-      const sport = game.sport || '';
-      const status = game.status || '';
-      const venue = game.venue || '';
-      
-      return (
-        homeTeam.toString().toLowerCase().includes(query) ||
-        awayTeam.toString().toLowerCase().includes(query) ||
-        sport.toString().toLowerCase().includes(query) ||
-        status.toString().toLowerCase().includes(query) ||
-        venue.toString().toLowerCase().includes(query)
-      );
-    });
     
-    setFilteredGames(results);
-    setShowSuggestions(results.length === 0 && searchQuery.length > 2);
-  }, [searchQuery, allGames]);
+    // Show suggestions when typing
+    setShowSuggestions(true);
+  };
 
-  const handleSearch = useCallback((query) => {
-    setSearchQuery(query);
-    addToSearchHistory(query);
-  }, [addToSearchHistory]);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // Re-apply search if there's a query
+      if (searchQuery) {
+        const results = searchGames(searchQuery);
+        setFilteredGames(results);
+      }
+      
+      Alert.alert('Success', 'Game data has been refreshed!', [{ text: 'OK' }]);
+    } catch (error) {
+      console.error('Refresh failed:', error);
+      Alert.alert('Refresh Failed', 'Could not update game data. Please try again.');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [searchQuery, searchGames]);
+
+  // Fix 4: Clear search when changing tabs/filters
+  const handleTabChange = (tabId) => {
+    setActiveTab(tabId);
+    // Clear search for better UX when changing tabs
+    if (searchQuery) {
+      setSearchQuery('');
+      setSearchInput('');
+      setFilteredGames([]);
+    }
+  };
 
   const handleSelectGame = useCallback((game) => {
     setSelectedGame(game);
     setSearchQuery('');
+    setSearchInput('');
     setFilteredGames([]);
     setShowSuggestions(false);
     
@@ -384,21 +572,8 @@ export default function GameDetailsScreen({ navigation, route }) {
   }, [fadeAnim]);
 
   const handleSuggestionTap = useCallback((suggestion) => {
-    setSearchQuery(suggestion.text);
-  }, []);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      Alert.alert('Success', 'Game data has been refreshed!', [{ text: 'OK' }]);
-    } catch (error) {
-      console.error('Refresh failed:', error);
-      Alert.alert('Refresh Failed', 'Could not update game data. Please try again.');
-    } finally {
-      setRefreshing(false);
-    }
+    setSearchInput(suggestion.text);
+    handleSearchSubmit(suggestion.text);
   }, []);
 
   // AI Prompt Functions
@@ -427,6 +602,39 @@ export default function GameDetailsScreen({ navigation, route }) {
       setLoadingAI(false);
     }, 1500);
   }, [selectedGame]);
+
+  // Fix 4: Team selector component
+  const renderTeamSelector = () => (
+    <View style={styles.teamSection}>
+      <Text style={styles.teamSectionTitle}>Filter by Team</Text>
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false}
+        style={styles.teamSelector}
+      >
+        <TouchableOpacity
+          style={[styles.teamPill, selectedTeam === 'all' && styles.activeTeamPill]}
+          onPress={() => setSelectedTeam('all')}
+        >
+          <Text style={[styles.teamText, selectedTeam === 'all' && styles.activeTeamText]}>
+            All Teams
+          </Text>
+        </TouchableOpacity>
+        
+        {teams[selectedGame?.sport || 'NFL']?.map(team => (
+          <TouchableOpacity
+            key={team.id}
+            style={[styles.teamPill, selectedTeam === team.id && styles.activeTeamPill]}
+            onPress={() => setSelectedTeam(team.id)}
+          >
+            <Text style={[styles.teamText, selectedTeam === team.id && styles.activeTeamText]}>
+              {team.name.split(' ').pop()} {/* Show just last name */}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
 
   const renderTabContent = useCallback(() => {
     const homeTeamName = selectedGame?.homeTeam?.name || selectedGame?.homeTeam || 'Home Team';
@@ -618,18 +826,42 @@ export default function GameDetailsScreen({ navigation, route }) {
           </TouchableOpacity>
         </View>
 
-        {/* Search Bar */}
+        {/* Fix 2: Updated Search Bar */}
         <View style={styles.searchContainer}>
-          <SearchBar
-            placeholder="Search games, teams, or leagues..."
-            onSearch={handleSearch}
-            searchHistory={searchHistory}
-            style={styles.searchBar}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            onFocus={() => setShowSuggestions(true)}
-          />
+          <View style={styles.searchBar}>
+            <TextInput
+              value={searchInput}
+              onChangeText={handleSearch}
+              onSubmitEditing={() => handleSearchSubmit()}
+              placeholder="Search games, teams, or leagues..."
+              style={styles.searchInput}
+              placeholderTextColor="#94a3b8"
+              returnKeyType="search"
+            />
+            <TouchableOpacity onPress={() => handleSearchSubmit()}>
+              <Ionicons name="search" size={20} color="#3b82f6" />
+            </TouchableOpacity>
+          </View>
+          
+          {/* Debug info from Fix 4 */}
+          {(searchQuery || selectedTeam !== 'all') && (
+            <View style={styles.debugContainer}>
+              <Text style={styles.debugText}>
+                Search: "{searchQuery}" • Filter: "{selectedTeam}" • Results: {filteredGames.length}
+              </Text>
+              <TouchableOpacity onPress={() => {
+                setSearchQuery('');
+                setSearchInput('');
+                setSelectedTeam('all');
+              }}>
+                <Text style={styles.clearSearchText}>Clear All</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
+
+        {/* Team Selector */}
+        {selectedGame?.sport && renderTeamSelector()}
 
         {/* Search Results */}
         {filteredGames.length > 0 && (
@@ -657,7 +889,7 @@ export default function GameDetailsScreen({ navigation, route }) {
         )}
 
         {/* Search Suggestions */}
-        {showSuggestions && searchQuery.length > 2 && (
+        {showSuggestions && searchInput.length > 2 && (
           <View style={styles.suggestionsContainer}>
             <View style={styles.suggestionsHeader}>
               <Ionicons name="bulb" size={18} color="#fbbf24" />
@@ -700,13 +932,15 @@ export default function GameDetailsScreen({ navigation, route }) {
           style={{ opacity: fadeAnim }}
         >
           {/* Selected Game Cards */}
-          <View style={styles.selectedGameContainer}>
-            <GameCard 
-              game={selectedGame}
-              isSelected={true}
-              onPress={() => {}} // Already selected
-            />
-          </View>
+          {!searchQuery && (
+            <View style={styles.selectedGameContainer}>
+              <GameCard 
+                game={selectedGame}
+                isSelected={true}
+                onPress={() => {}} // Already selected
+              />
+            </View>
+          )}
 
           {/* Game Header */}
           <View style={styles.gameHeader}>
@@ -807,7 +1041,7 @@ export default function GameDetailsScreen({ navigation, route }) {
               <TouchableOpacity
                 key={tab.id}
                 style={[styles.tab, activeTab === tab.id && styles.activeTab]}
-                onPress={() => setActiveTab(tab.id)}
+                onPress={() => handleTabChange(tab.id)}
                 activeOpacity={0.7}
               >
                 <Ionicons 
@@ -937,38 +1171,40 @@ export default function GameDetailsScreen({ navigation, route }) {
           </View>
 
           {/* More Games Section */}
-          <View style={styles.moreGamesSection}>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionHeaderLeft}>
-                <Ionicons name="list" size={24} color="#fff" />
-                <Text style={styles.sectionTitle}>More Games</Text>
+          {!searchQuery && (
+            <View style={styles.moreGamesSection}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionHeaderLeft}>
+                  <Ionicons name="list" size={24} color="#fff" />
+                  <Text style={styles.sectionTitle}>More Games</Text>
+                </View>
+                <TouchableOpacity 
+                  style={styles.viewAllButton}
+                  onPress={() => setSearchQuery('all')}
+                >
+                  <Text style={styles.viewAllText}>View All</Text>
+                  <Ionicons name="chevron-forward" size={16} color="#94a3b8" />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity 
-                style={styles.viewAllButton}
-                onPress={() => setSearchQuery('')}
+              
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.moreGamesContent}
               >
-                <Text style={styles.viewAllText}>View All</Text>
-                <Ionicons name="chevron-forward" size={16} color="#94a3b8" />
-              </TouchableOpacity>
+                {allGames
+                  .filter(game => game.id !== selectedGame.id)
+                  .slice(0, 3)
+                  .map((game) => (
+                    <MoreGameCard
+                      key={game.id}
+                      game={game}
+                      onPress={() => handleSelectGame(game)}
+                    />
+                  ))}
+              </ScrollView>
             </View>
-            
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.moreGamesContent}
-            >
-              {allGames
-                .filter(game => game.id !== selectedGame.id)
-                .slice(0, 3)
-                .map((game) => (
-                  <MoreGameCard
-                    key={game.id}
-                    game={game}
-                    onPress={() => handleSelectGame(game)}
-                  />
-                ))}
-            </ScrollView>
-          </View>
+          )}
         </Animated.ScrollView>
 
         {/* AI Analysis Modal */}
@@ -1045,7 +1281,7 @@ export default function GameDetailsScreen({ navigation, route }) {
   );
 }
 
-// Keep the same styles from the previous version
+// Keep the same styles from the previous version and add new ones
 const styles = StyleSheet.create({
   container: { 
     flex: 1,
@@ -1091,6 +1327,79 @@ const styles = StyleSheet.create({
   searchContainer: {
     paddingHorizontal: 20,
     paddingVertical: 12,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  searchInput: {
+    flex: 1,
+    color: 'white',
+    fontSize: 16,
+    paddingRight: 10,
+  },
+  debugContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.3)',
+  },
+  debugText: {
+    color: '#3b82f6',
+    fontSize: 11,
+  },
+  clearSearchText: {
+    color: '#ef4444',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  // Fix 4: Team selector styles
+  teamSection: {
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    backgroundColor: '#1e293b',
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+  },
+  teamSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#94a3b8',
+    marginBottom: 8,
+  },
+  teamSelector: {
+    height: 40,
+  },
+  teamPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#334155',
+    marginRight: 8,
+  },
+  activeTeamPill: {
+    backgroundColor: '#3b82f6',
+  },
+  teamText: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  activeTeamText: {
+    color: '#fff',
+    fontWeight: 'bold',
   },
   searchResults: {
     backgroundColor: '#1e293b',
@@ -1264,12 +1573,11 @@ const styles = StyleSheet.create({
     top: 12,
     right: 12,
   },
-  // FIXED: Added solid background color to gameHeader for shadow
   gameHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#1e293b', // SOLID BACKGROUND FOR SHADOW
+    backgroundColor: '#1e293b',
     borderRadius: 24,
     padding: 24,
     marginBottom: 20,
@@ -1294,7 +1602,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 3,
     borderColor: '#334155',
-    elevation: 4, // KEEP FOR ANDROID, REMOVE iOS SHADOW PROPERTIES
+    elevation: 4,
   },
   teamName: {
     color: '#fff',
@@ -1397,7 +1705,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     borderWidth: 1,
     borderColor: '#334155',
-    elevation: 2, // SIMPLIFY SHADOW FOR ANDROID ONLY
+    elevation: 2,
   },
   oddsItem: {
     flex: 1,

@@ -1,5 +1,5 @@
-// src/screens/PredictionsOutcomeScreen.js - CORRECTED VERSION
-import React, { useState, useEffect } from 'react';
+// src/screens/PredictionsOutcomeScreen.js - UPDATED WITH ALL FIXES
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -19,9 +19,17 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// FILE 5: Add data imports
+import { samplePlayers } from '../data/players';
+import { teams } from '../data/teams';
+import { statCategories } from '../data/stats';
+
+// FILE 6: Add backend API
+import { playerApi } from '../services/api';
+
 import { logAnalyticsEvent, logScreenView } from '../services/firebase';
 import { useAppNavigation } from '../navigation/NavigationHelper';
-import SearchBar from '../components/SearchBar';
 import { useSearch } from '../providers/SearchProvider';
 import isExpoGo from '../utils/isExpoGo';
 
@@ -56,7 +64,7 @@ if (isExpoGo()) {
 
 const { width } = Dimensions.get('window');
 
-// FIXED: Daily Prediction Generator Box Component
+// FIXED: Daily Prediction Generator Box Component - Updated per File 3
 const DailyPredictionGenerator = ({ onGenerate, isGenerating }) => {
   const [generatedToday, setGeneratedToday] = useState(false);
   const [dailyPredictions, setDailyPredictions] = useState([]);
@@ -113,6 +121,7 @@ const DailyPredictionGenerator = ({ onGenerate, isGenerating }) => {
     const today = new Date().toDateString();
     AsyncStorage.setItem('last_prediction_generation', today);
     setGeneratedToday(true);
+    // Call the parent's onGenerate function - no navigation logic here
     onGenerate?.();
     
     Alert.alert(
@@ -970,16 +979,20 @@ const predictionAnalyticsStyles = StyleSheet.create({
 });
 
 // Main Predictions Screen Component
-export default function PredictionsScreen() {
-  const navigation = useAppNavigation();
-  const { searchHistory, addToSearchHistory } = useSearch();
+export default function PredictionsScreen({ route, navigation }) {
+  
+  // Updated per File 1: Safely access search properties
+  const { searchHistory: providerSearchHistory, addToSearchHistory: providerAddToSearchHistory } = useSearch();
+  
+  // FILE 2: Add search implementation states
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [predictions, setPredictions] = useState([]);
   const [filteredPredictions, setFilteredPredictions] = useState([]);
   const [selectedLeague, setSelectedLeague] = useState('All');
-  const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [customQuery, setCustomQuery] = useState('');
   const [simulating, setSimulating] = useState(false);
@@ -987,6 +1000,56 @@ export default function PredictionsScreen() {
   const [selectedTimeframe, setSelectedTimeframe] = useState('Today');
   const [generatingPredictions, setGeneratingPredictions] = useState(false);
   
+  // FILE 4 & 6: Add backend API states
+  const [realPlayers, setRealPlayers] = useState([]);
+  const [useBackend, setUseBackend] = useState(true);
+  const [backendError, setBackendError] = useState(null);
+  const [filter, setFilter] = useState('all');
+  
+  // FILE 5: Add team filter state
+  const [selectedTeamFilter, setSelectedTeamFilter] = useState('all');
+
+  // FILE 3: Handle navigation params
+  useEffect(() => {
+    if (route.params?.initialSearch) {
+      setSearchInput(route.params.initialSearch);
+      setSearchQuery(route.params.initialSearch);
+      handleSearchSubmit(route.params.initialSearch);
+    }
+    if (route.params?.initialSport) {
+      // Handle sport-specific initialization if needed
+      setSelectedLeague(route.params.initialSport);
+    }
+  }, [route.params]);
+
+  // Initialize data with backend check
+  useEffect(() => {
+    const initializeData = async () => {
+      try {
+        // Check if backend is available
+        if (process.env.EXPO_PUBLIC_USE_BACKEND === 'true') {
+          const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/health`);
+          if (response.ok) {
+            setUseBackend(true);
+          } else {
+            setUseBackend(false);
+            console.log('Backend not available, using sample data');
+          }
+        } else {
+          setUseBackend(false);
+        }
+      } catch (error) {
+        console.log('Backend check failed, using sample data:', error.message);
+        setUseBackend(false);
+      }
+      
+      loadPredictions();
+      logScreenView('PredictionsScreen');
+    };
+    
+    initializeData();
+  }, []);
+
   // Mock prediction data
   const mockPredictions = [
     {
@@ -1084,9 +1147,311 @@ export default function PredictionsScreen() {
     "Generate same-game parlay predictions"
   ];
 
-  useEffect(() => {
-    logScreenView('PredictionsScreen');
-    loadPredictions();
+  // FILE 2: Updated search implementation
+  const handleSearchSubmit = async (query = '') => {
+    const searchText = query || searchInput.trim();
+    if (searchText) {
+      await addToSearchHistory(searchText);
+      setSearchQuery(searchText);
+      handleSearch(searchText);
+    }
+  };
+
+  // Updated search functionality with improved logic from FILE 4
+  const handleSearch = useCallback((query) => {
+    setSearchInput(query);
+    setSearchQuery(query);
+    
+    if (query.trim()) {
+      addToSearchHistory(query);
+    }
+    
+    if (!query.trim()) {
+      setFilteredPredictions(predictions);
+      return;
+    }
+
+    const lowerQuery = query.toLowerCase().trim();
+    
+    // Split search into keywords
+    const searchKeywords = lowerQuery.split(/\s+/).filter(keyword => keyword.length > 0);
+    
+    // Apply search FIRST before any other filters
+    let filtered = predictions;
+    
+    if (searchKeywords.length > 0) {
+      console.log(`Searching for: "${lowerQuery}" in ALL ${predictions.length} predictions`);
+      console.log('Search keywords:', searchKeywords);
+      
+      // First, try exact search for team names
+      let teamSearchResults = [];
+      if (searchKeywords.length >= 2) {
+        const possibleTeamName = searchKeywords.join(' ');
+        teamSearchResults = predictions.filter(pred => 
+          (pred.homeTeam || '').toLowerCase().includes(possibleTeamName) ||
+          (pred.awayTeam || '').toLowerCase().includes(possibleTeamName)
+        );
+        console.log(`Team search for "${possibleTeamName}": ${teamSearchResults.length} results`);
+      }
+      
+      // If we found exact team matches, use those
+      if (teamSearchResults.length > 0) {
+        filtered = teamSearchResults;
+      } else {
+        // Otherwise, search by keywords
+        filtered = predictions.filter(pred => {
+          const homeTeam = (pred.homeTeam || '').toLowerCase();
+          const awayTeam = (pred.awayTeam || '').toLowerCase();
+          const league = (pred.league || '').toLowerCase();
+          const type = (pred.type || '').toLowerCase();
+          const predictedWinner = (pred.predictedWinner || '').toLowerCase();
+          const analysis = (pred.analysis || '').toLowerCase();
+          
+          // Check each keyword
+          for (const keyword of searchKeywords) {
+            // Skip very common words that don't help
+            const commonWords = ['prediction', 'predictions', 'game', 'games', 'team', 'teams', 'player', 'players'];
+            if (commonWords.includes(keyword)) {
+              continue;
+            }
+            
+            // Check if keyword matches any prediction property
+            if (
+              homeTeam.includes(keyword) ||
+              awayTeam.includes(keyword) ||
+              league.includes(keyword) ||
+              type.includes(keyword) ||
+              predictedWinner.includes(keyword) ||
+              analysis.includes(keyword) ||
+              homeTeam.split(' ').some(word => word.includes(keyword)) ||
+              awayTeam.split(' ').some(word => word.includes(keyword))
+            ) {
+              console.log(`✓ Prediction ${pred.homeTeam} vs ${pred.awayTeam}: matched keyword "${keyword}"`);
+              return true;
+            }
+          }
+          
+          // If we have multiple keywords, require at least one match
+          if (searchKeywords.length > 0) {
+            // Check if we skipped all keywords (all were common words)
+            const nonCommonKeywords = searchKeywords.filter(kw => 
+              !['prediction', 'predictions', 'game', 'games', 'team', 'teams', 'player', 'players'].includes(kw)
+            );
+            
+            if (nonCommonKeywords.length === 0) {
+              // If all keywords were common words, show all predictions
+              console.log(`Prediction ${pred.homeTeam} vs ${pred.awayTeam}: all keywords were common words, showing anyway`);
+              return true;
+            }
+            
+            console.log(`✗ Prediction ${pred.homeTeam} vs ${pred.awayTeam}: no matches`);
+            return false;
+          }
+          
+          return true;
+        });
+      }
+      
+      console.log(`Found ${filtered.length} predictions after search`);
+      
+      // If no results, try fuzzy matching on first non-common keyword
+      if (filtered.length === 0 && searchKeywords.length > 0) {
+        console.log('Trying fuzzy search...');
+        const nonCommonKeywords = searchKeywords.filter(kw => 
+          !['prediction', 'predictions', 'game', 'games', 'team', 'teams', 'player', 'players'].includes(kw)
+        );
+        
+        if (nonCommonKeywords.length > 0) {
+          const mainKeyword = nonCommonKeywords[0];
+          console.log(`Fuzzy searching for: "${mainKeyword}"`);
+          
+          filtered = predictions.filter(pred => {
+            const homeTeam = (pred.homeTeam || '').toLowerCase();
+            const awayTeam = (pred.awayTeam || '').toLowerCase();
+            const league = (pred.league || '').toLowerCase();
+            const predictedWinner = (pred.predictedWinner || '').toLowerCase();
+            
+            // Check if main keyword appears anywhere
+            const matches = 
+              homeTeam.includes(mainKeyword) ||
+              awayTeam.includes(mainKeyword) ||
+              league.includes(mainKeyword) ||
+              predictedWinner.includes(mainKeyword) ||
+              homeTeam.split(' ').some(word => word.startsWith(mainKeyword.substring(0, 3))) ||
+              awayTeam.split(' ').some(word => word.startsWith(mainKeyword.substring(0, 3)));
+            
+            if (matches) {
+              console.log(`✓ Prediction ${pred.homeTeam} vs ${pred.awayTeam}: fuzzy matched "${mainKeyword}"`);
+            }
+            return matches;
+          });
+          
+          console.log(`Found ${filtered.length} predictions after fuzzy search`);
+        }
+      }
+    }
+    
+    // NOW apply league filter to search results
+    if (selectedLeague !== 'All') {
+      const beforeFilterCount = filtered.length;
+      filtered = filtered.filter(pred => pred.league === selectedLeague);
+      console.log(`Applied league filter "${selectedLeague}": ${beforeFilterCount} -> ${filtered.length} predictions`);
+    }
+    
+    setFilteredPredictions(filtered);
+  }, [predictions, selectedLeague]);
+
+  // FILE 4: Handle filter change
+  const handleFilterChange = async (newFilter) => {
+    logAnalyticsEvent('prediction_filter_change', {
+      from_filter: filter,
+      to_filter: newFilter,
+      league: selectedLeague,
+    });
+    setFilter(newFilter);
+    // Clear search when changing filters for better UX
+    setSearchQuery('');
+    setSearchInput('');
+  };
+
+  // FILE 5: Render team selector component
+  const renderTeamSelector = () => (
+    <View style={predictionStyles.teamSection}>
+      <Text style={predictionStyles.teamSectionTitle}>Filter by Team</Text>
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false}
+        style={predictionStyles.teamSelector}
+      >
+        <TouchableOpacity
+          style={[predictionStyles.teamPill, selectedTeamFilter === 'all' && predictionStyles.activeTeamPill]}
+          onPress={() => setSelectedTeamFilter('all')}
+        >
+          <Text style={[predictionStyles.teamText, selectedTeamFilter === 'all' && predictionStyles.activeTeamText]}>
+            All Teams
+          </Text>
+        </TouchableOpacity>
+        
+        {teams['NBA']?.slice(0, 8).map(team => (
+          <TouchableOpacity
+            key={team.id}
+            style={[predictionStyles.teamPill, selectedTeamFilter === team.id && predictionStyles.activeTeamPill]}
+            onPress={() => setSelectedTeamFilter(team.id)}
+          >
+            <Text style={[predictionStyles.teamText, selectedTeamFilter === team.id && predictionStyles.activeTeamText]}>
+              {team.name.split(' ').pop()} {/* Show just last name */}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
+
+  // FILE 6: Load players from backend function
+  const loadPlayersFromBackend = useCallback(async (searchQuery = '', positionFilter = 'all') => {
+    try {
+      setLoading(true);
+      setBackendError(null);
+      
+      console.log('Fetching players from backend...');
+      
+      const filters = {};
+      if (positionFilter !== 'all') {
+        filters.position = positionFilter;
+      }
+      
+      let players = [];
+      
+      if (searchQuery) {
+        // Use search endpoint
+        const searchResults = await playerApi.searchPlayers('NBA', searchQuery, filters);
+        players = searchResults.players || searchResults;
+        console.log(`Backend search found ${players.length} players for "${searchQuery}"`);
+      } else {
+        // Get all players with optional position filter
+        const allPlayers = await playerApi.getPlayers('NBA', filters);
+        players = allPlayers.players || allPlayers;
+        console.log(`Backend returned ${players.length} players for NBA`);
+      }
+      
+      // If no results from backend and we should fallback to sample data
+      if ((!players || players.length === 0) && process.env.EXPO_PUBLIC_FALLBACK_TO_SAMPLE === 'true') {
+        console.log('No results from backend, falling back to sample data');
+        players = filterSamplePlayers(searchQuery, positionFilter);
+      }
+      
+      setRealPlayers(players);
+      return players;
+      
+    } catch (error) {
+      console.error('Error loading players from backend:', error);
+      setBackendError(error.message);
+      
+      // Fallback to sample data if backend fails
+      if (process.env.EXPO_PUBLIC_FALLBACK_TO_SAMPLE === 'true') {
+        console.log('Backend failed, falling back to sample data');
+        return filterSamplePlayers(searchQuery, positionFilter);
+      }
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // FILE 4: Sample data filter function
+  const filterSamplePlayers = useCallback((searchQuery = '', positionFilter = 'all', teamFilter = 'all') => {
+    const sportPlayers = samplePlayers['NBA'] || [];
+    
+    let filteredPlayers = sportPlayers;
+    
+    // Apply position filter
+    if (positionFilter !== 'all') {
+      filteredPlayers = sportPlayers.filter(player => {
+        return player.position === positionFilter;
+      });
+    }
+    
+    // Apply team filter
+    if (teamFilter !== 'all') {
+      const team = teams['NBA']?.find(t => t.id === teamFilter);
+      if (team) {
+        filteredPlayers = filteredPlayers.filter(player => 
+          player.team === team.name
+        );
+      }
+    }
+    
+    // Apply search filter
+    if (searchQuery) {
+      const searchLower = searchQuery.toLowerCase().trim();
+      const searchKeywords = searchLower.split(/\s+/).filter(keyword => keyword.length > 0);
+      
+      filteredPlayers = filteredPlayers.filter(player => {
+        const playerName = player.name.toLowerCase();
+        const playerTeam = player.team.toLowerCase();
+        const playerPosition = player.position ? player.position.toLowerCase() : '';
+        
+        for (const keyword of searchKeywords) {
+          const commonWords = ['player', 'players', 'stats', 'stat', 'statistics'];
+          if (commonWords.includes(keyword)) continue;
+          
+          if (
+            playerName.includes(keyword) ||
+            playerTeam.includes(keyword) ||
+            playerPosition.includes(keyword) ||
+            playerTeam.split(' ').some(word => word.includes(keyword)) ||
+            playerName.split(' ').some(word => word.includes(keyword))
+          ) {
+            return true;
+          }
+        }
+        
+        return searchKeywords.length === 0;
+      });
+    }
+    
+    console.log(`Sample data filtered: ${filteredPlayers.length} players`);
+    return filteredPlayers;
   }, []);
 
   const loadPredictions = async () => {
@@ -1094,12 +1459,16 @@ export default function PredictionsScreen() {
       setLoading(true);
       await new Promise(resolve => setTimeout(resolve, 1000));
       
-      const filtered = selectedLeague === 'All' 
-        ? mockPredictions 
-        : mockPredictions.filter(pred => pred.league === selectedLeague);
+      // Always set the full list
+      setPredictions(mockPredictions);
       
-      setPredictions(filtered);
+      // Apply initial filtering
+      let filtered = mockPredictions;
+      if (selectedLeague !== 'All') {
+        filtered = filtered.filter(pred => pred.league === selectedLeague);
+      }
       setFilteredPredictions(filtered);
+      
       setLoading(false);
       setRefreshing(false);
     } catch (error) {
@@ -1113,28 +1482,6 @@ export default function PredictionsScreen() {
     setRefreshing(true);
     await loadPredictions();
     logAnalyticsEvent('predictions_refresh');
-  };
-
-  const handleSearch = (query) => {
-    setSearchQuery(query);
-    addToSearchHistory(query);
-    
-    if (!query.trim()) {
-      setFilteredPredictions(predictions);
-      return;
-    }
-
-    const lowerQuery = query.toLowerCase();
-    const filtered = predictions.filter(pred =>
-      (pred.homeTeam || '').toLowerCase().includes(lowerQuery) ||
-      (pred.awayTeam || '').toLowerCase().includes(lowerQuery) ||
-      (pred.league || '').toLowerCase().includes(lowerQuery) ||
-      (pred.predictedWinner || '').toLowerCase().includes(lowerQuery) ||
-      (pred.type || '').toLowerCase().includes(lowerQuery)
-    );
-    
-    setFilteredPredictions(filtered);
-    logAnalyticsEvent('predictions_search', { query, results: filtered.length });
   };
 
   const simulateOutcome = async (predictionId) => {
@@ -1166,12 +1513,21 @@ export default function PredictionsScreen() {
     }
   };
 
+  // Updated per File 3: Handle generation logic in this screen, don't navigate
   const handleGeneratePredictions = () => {
     setGeneratingPredictions(true);
+    // Do your generation logic here
+    // When done, show results in THIS screen
     setTimeout(() => {
       setGeneratingPredictions(false);
+      // Show results in current screen, don't navigate
+      Alert.alert(
+        'Predictions Generated!',
+        'Daily predictions have been successfully generated and are now available in your feed.',
+        [{ text: 'OK', style: 'default' }]
+      );
       logAnalyticsEvent('daily_predictions_generated');
-    }, 1500);
+    }, 2000);
   };
 
   const renderPredictionItem = ({ item }) => {
@@ -1313,6 +1669,8 @@ export default function PredictionsScreen() {
                     return;
                   }
                   
+                  // Updated per File 2: Handle the search result in current screen, don't navigate
+                  console.log('Selected prediction:', item);
                   logAnalyticsEvent('prediction_tracked', {
                     type: item.type,
                     league: item.league,
@@ -1335,6 +1693,15 @@ export default function PredictionsScreen() {
       </View>
     );
   };
+
+  // Add debug display for filter and search
+  const renderDebugInfo = () => (
+    <View style={{paddingHorizontal: 16, marginBottom: 8}}>
+      <Text style={{color: 'white', fontSize: 12}}>
+        DEBUG: Filter = "{filter}", Search = "{searchQuery}"
+      </Text>
+    </View>
+  );
 
   if (loading) {
     return (
@@ -1385,6 +1752,18 @@ export default function PredictionsScreen() {
         </LinearGradient>
       </View>
 
+      {/* FILE 6: Add backend error display */}
+      {backendError && (
+        <View style={predictionStyles.errorContainer}>
+          <Text style={predictionStyles.errorText}>
+            Backend Error: {backendError}. Using sample data.
+          </Text>
+        </View>
+      )}
+      
+      {/* FILE 4: Add debug info */}
+      {renderDebugInfo()}
+      
       <ScrollView
         refreshControl={
           <RefreshControl
@@ -1397,16 +1776,23 @@ export default function PredictionsScreen() {
       >
         {showSearch && (
           <>
-            <SearchBar
-              placeholder="Search predictions by type, league, or team..."
-              onSearch={handleSearch}
-              searchHistory={searchHistory}
-              style={predictionStyles.homeSearchBar}
-              onClose={() => {
-                setShowSearch(false);
-                setSearchQuery('');
-              }}
-            />
+            {/* FILE 2: Updated search bar with TextInput implementation */}
+            <View style={predictionStyles.searchContainer}>
+              <TextInput
+                value={searchInput}
+                onChangeText={setSearchInput}
+                onSubmitEditing={() => handleSearchSubmit()}
+                placeholder="Search predictions by type, league, or team..."
+                style={predictionStyles.searchInput}
+                placeholderTextColor="#94a3b8"
+              />
+              <TouchableOpacity 
+                onPress={() => handleSearchSubmit()}
+                style={predictionStyles.searchButton}
+              >
+                <Ionicons name="search" size={20} color="#059669" />
+              </TouchableOpacity>
+            </View>
             
             {searchQuery.trim() && predictions.length !== filteredPredictions.length && (
               <View style={predictionStyles.searchResultsInfo}>
@@ -1414,7 +1800,11 @@ export default function PredictionsScreen() {
                   {filteredPredictions.length} of {predictions.length} predictions match "{searchQuery}"
                 </Text>
                 <TouchableOpacity 
-                  onPress={() => setSearchQuery('')}
+                  onPress={() => {
+                    setSearchQuery('');
+                    setSearchInput('');
+                    handleSearch('');
+                  }}
                   activeOpacity={0.7}
                 >
                   <Text style={predictionStyles.clearSearchText}>Clear</Text>
@@ -1424,6 +1814,7 @@ export default function PredictionsScreen() {
           </>
         )}
 
+        {/* Updated per File 3: Using the correct DailyPredictionGenerator component */}
         <DailyPredictionGenerator 
           onGenerate={handleGeneratePredictions}
           isGenerating={generatingPredictions}
@@ -1456,6 +1847,9 @@ export default function PredictionsScreen() {
           ))}
         </View>
 
+        {/* FILE 5: Add team selector */}
+        {renderTeamSelector()}
+        
         <View style={predictionStyles.leagueSelector}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {[
@@ -1475,6 +1869,9 @@ export default function PredictionsScreen() {
                 ]}
                 onPress={() => {
                   setSelectedLeague(league.id);
+                  // FILE 4: Clear search when changing filters for better UX
+                  setSearchQuery('');
+                  setSearchInput('');
                   logAnalyticsEvent('predictions_league_filter', { league: league.id });
                 }}
               >
@@ -1787,6 +2184,89 @@ const predictionStyles = StyleSheet.create({
     fontWeight: '500',
   },
 
+  // FILE 2: Search bar styles
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginTop: 20,
+    marginBottom: 8,
+    backgroundColor: '#1e293b',
+    borderRadius: 25,
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  
+  searchInput: {
+    flex: 1,
+    color: '#f1f5f9',
+    fontSize: 16,
+    paddingVertical: 4,
+  },
+  
+  searchButton: {
+    padding: 4,
+  },
+
+  // FILE 5: Team selector styles
+  teamSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#1e293b',
+    marginBottom: 20,
+  },
+  
+  teamSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#94a3b8',
+    marginBottom: 8,
+  },
+  
+  teamSelector: {
+    height: 40,
+  },
+  
+  teamPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#334155',
+    marginRight: 8,
+  },
+  
+  activeTeamPill: {
+    backgroundColor: '#3b82f6',
+  },
+  
+  teamText: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  
+  activeTeamText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+
+  // FILE 6: Error styles
+  errorContainer: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    margin: 16,
+  },
+  
+  errorText: {
+    color: '#dc2626',
+    fontSize: 12,
+  },
+
   typeBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -1913,12 +2393,6 @@ const predictionStyles = StyleSheet.create({
     color: 'white',
   },
 
-  homeSearchBar: {
-    marginHorizontal: 16,
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  
   searchResultsInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',

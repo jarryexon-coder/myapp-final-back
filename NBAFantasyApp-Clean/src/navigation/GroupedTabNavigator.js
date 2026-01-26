@@ -1,7 +1,8 @@
+// src/navigation/GroupedTabNavigator.js - UPDATED VERSION
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
-import Ionicons from '@expo/vector-icons/Ionicons'; // This is imported as Ionicons
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 // Import Hub Screens
 import AllAccessHubScreen from '../screens/AllAccessHubScreen';
@@ -26,14 +27,44 @@ import KalshiPredictionsScreen from '../screens/KalshiPredictionsScreen';
 import SecretPhrasesScreen from '../screens/SecretPhraseScreen';
 import HomeScreen from '../screens/HomeScreen';
 import SubscriptionScreen from '../screens/SubscriptionScreen';
+import BackendTestScreen from '../screens/BackendTestScreen';
+
+// Import NEW screens
+import PrizePicksScreen from '../screens/PrizePicksScreen';
+import LoginScreen from '../screens/LoginScreen-enhanced';
+import DiagnosticScreen from '../screens/DiagnosticScreen'; // NEW
 
 // Create stack navigators
 const AllAccessStack = createStackNavigator();
 const SuperStatsStack = createStackNavigator();
 const AIGeneratorsStack = createStackNavigator();
 const EliteToolsStack = createStackNavigator();
+const AuthStack = createStackNavigator();
+const DevToolsStack = createStackNavigator(); // NEW: Dev tools stack
 
-// Create stack components
+// NEW: Dev Tools Stack for diagnostics and testing
+function DevToolsStackScreen() {
+  return (
+    <DevToolsStack.Navigator 
+      screenOptions={{ 
+        headerShown: false,
+        cardStyle: { backgroundColor: '#0a0a0a' }
+      }}
+    >
+      <DevToolsStack.Screen 
+        name="DiagnosticHub" 
+        component={DiagnosticScreen}
+        options={{ title: 'Diagnostics' }}
+      />
+      <DevToolsStack.Screen 
+        name="BackendTest" 
+        component={BackendTestScreen}
+        options={{ title: 'Connection Test' }}
+      />
+    </DevToolsStack.Navigator>
+  );
+}
+
 function AllAccessStackScreen() {
   return (
     <AllAccessStack.Navigator 
@@ -150,7 +181,27 @@ function EliteToolsStackScreen() {
         name="SecretPhrases" 
         component={SecretPhrasesScreen} 
       />
+      <EliteToolsStack.Screen 
+        name="PrizePicksGenerator" 
+        component={PrizePicksScreen} 
+      />
     </EliteToolsStack.Navigator>
+  );
+}
+
+function AuthStackScreen() {
+  return (
+    <AuthStack.Navigator 
+      screenOptions={{ 
+        headerShown: false,
+        cardStyle: { backgroundColor: '#0a0a0a' }
+      }}
+    >
+      <AuthStack.Screen 
+        name="Login" 
+        component={LoginScreen} 
+      />
+    </AuthStack.Navigator>
   );
 }
 
@@ -158,6 +209,9 @@ function EliteToolsStackScreen() {
 const Tab = createBottomTabNavigator();
 
 export default function GroupedTabNavigator() {
+  // Determine if we should show dev tools (only in development)
+  const isDevelopment = __DEV__ || process.env.NODE_ENV === 'development';
+  
   return (
     <Tab.Navigator
       initialRouteName="Home"
@@ -190,9 +244,12 @@ export default function GroupedTabNavigator() {
             iconName = focused ? 'shield' : 'shield-outline';
           } else if (route.name === 'Subscription') {
             iconName = focused ? 'star' : 'star-outline';
+          } else if (route.name === 'Login') {
+            iconName = focused ? 'log-in' : 'log-in-outline';
+          } else if (route.name === 'DevTools') {
+            iconName = focused ? 'bug' : 'bug-outline';
           }
           
-          // FIXED: Use Ionicons, not Icon
           return <Ionicons name={iconName} size={size} color={color} />;
         },
       })}
@@ -208,7 +265,7 @@ export default function GroupedTabNavigator() {
         component={AllAccessStackScreen}
         options={{ tabBarLabel: 'All Access' }}
       />
-      
+
       <Tab.Screen 
         name="SuperStats" 
         component={SuperStatsStackScreen}
@@ -232,6 +289,21 @@ export default function GroupedTabNavigator() {
         component={SubscriptionScreen}
         options={{ tabBarLabel: 'Premium' }}
       />
+      
+      <Tab.Screen 
+        name="Login" 
+        component={AuthStackScreen}
+        options={{ tabBarLabel: 'Login' }}
+      />
+      
+      {/* NEW: Add DevTools tab - only visible in development */}
+      {isDevelopment && (
+        <Tab.Screen 
+          name="DevTools" 
+          component={DevToolsStackScreen}
+          options={{ tabBarLabel: 'Dev' }}
+        />
+      )}
     </Tab.Navigator>
   );
 }

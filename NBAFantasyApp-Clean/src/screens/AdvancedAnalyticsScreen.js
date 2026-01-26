@@ -27,6 +27,14 @@ import { useAnalytics } from '../hooks/useAnalytics';
 import { useAppNavigation } from '../navigation/NavigationHelper';
 import { logAnalyticsEvent, logScreenView } from '../services/firebase';
 
+// ADDED: Import data structures
+import { samplePlayers } from '../data/players';
+import { teams } from '../data/teams';
+import { statCategories } from '../data/stats';
+
+// ADDED: Import backend API
+import { playerApi } from '../services/api';
+
 const { width } = Dimensions.get('window');
 
 // NEW: Game Analytics Box Component
@@ -684,7 +692,9 @@ const analyticsStyles = StyleSheet.create({
 });
 
 export default function AnalyticsScreen({ navigation, route }) {
-  const { searchHistory, addToSearchHistory } = useSearch();
+
+  const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();
+ 
   const { logEvent } = useAnalytics();
   
   const { 
@@ -700,12 +710,24 @@ export default function AnalyticsScreen({ navigation, route }) {
     refreshInterval: 30000
   });
 
+  // ADDED: New states for backend data
+  const [realPlayers, setRealPlayers] = useState([]);
+  const [useBackend, setUseBackend] = useState(true);
+  const [backendError, setBackendError] = useState(null);
+  
+  // ADDED: Team filter state
+  const [selectedTeam, setSelectedTeam] = useState('all');
+
   // UPDATED: New states for prediction generator
   const [refreshing, setRefreshing] = useState(false);
   const [selectedSport, setSelectedSport] = useState('NBA');
   const [selectedMetric, setSelectedMetric] = useState('overview');
   const [lastUpdated, setLastUpdated] = useState(new Date());
+  
+  // UPDATED: Search states
+  const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  
   const [showPrompts, setShowPrompts] = useState(true);
   const [filteredData, setFilteredData] = useState([]);
   const [selectedPromptCategory, setSelectedPromptCategory] = useState('Team Performance');
@@ -719,6 +741,44 @@ export default function AnalyticsScreen({ navigation, route }) {
   const [selectedLeague, setSelectedLeague] = useState('All');
   const [selectedTimeframe, setSelectedTimeframe] = useState('Today');
   
+  // UPDATED: Handle navigation params for initial search and sport
+  useEffect(() => {
+    if (route.params?.initialSearch) {
+      setSearchInput(route.params.initialSearch);
+      setSearchQuery(route.params.initialSearch);
+      handleAnalyticsSearch(route.params.initialSearch);
+    }
+    if (route.params?.initialSport) {
+      setSelectedSport(route.params.initialSport);
+    }
+    
+    // Initialize backend data
+    initializeData();
+    logScreenView('AnalyticsScreen');
+  }, [route.params]);
+
+  // ADDED: Initialize data function
+  const initializeData = async () => {
+    try {
+      // Check if backend is available
+      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/health`);
+      if (response.ok) {
+        setUseBackend(true);
+        await loadPlayersFromBackend();
+      } else {
+        setUseBackend(false);
+        console.log('Backend not available, using sample data');
+        const players = filterSamplePlayers('', 'all');
+        setRealPlayers(players);
+      }
+    } catch (error) {
+      console.log('Backend check failed, using sample data:', error.message);
+      setUseBackend(false);
+      const players = filterSamplePlayers('', 'all');
+      setRealPlayers(players);
+    }
+  };
+
   // UPDATED: More diverse prediction queries from File 1
   const predictionQueries = [
     "Generate NBA player props for tonight",
@@ -789,6 +849,15 @@ export default function AnalyticsScreen({ navigation, route }) {
     }
   ];
 
+  // UPDATED: Handle search submit with search history
+  const handleSearchSubmit = async () => {
+    if (searchInput.trim()) {
+      await addToSearchHistory(searchInput.trim());
+      setSearchQuery(searchInput.trim());
+      handleAnalyticsSearch(searchInput.trim());
+    }
+  };
+
   // NEW: Handle prediction generation
   const handleGeneratePredictions = () => {
     setGeneratingPredictions(true);
@@ -835,6 +904,196 @@ export default function AnalyticsScreen({ navigation, route }) {
       setShowSimulationModal(false);
     }
   };
+
+  // ADDED: Load players from backend function
+  const loadPlayersFromBackend = useCallback(async (searchQuery = '', positionFilter = 'all') => {
+    try {
+      setRefreshing(true);
+      setBackendError(null);
+      
+      console.log('Fetching players from backend...');
+      
+      const filters = {};
+      if (positionFilter !== 'all') {
+        filters.position = positionFilter;
+      }
+      
+      let players = [];
+      
+      if (searchQuery) {
+        // Use search endpoint
+        const searchResults = await playerApi.searchPlayers(selectedSport, searchQuery, filters);
+        players = searchResults.players || searchResults;
+        console.log(`Backend search found ${players.length} players for "${searchQuery}"`);
+      } else {
+        // Get all players with optional position filter
+        const allPlayers = await playerApi.getPlayers(selectedSport, filters);
+        players = allPlayers.players || allPlayers;
+        console.log(`Backend returned ${players.length} players for ${selectedSport}`);
+      }
+      
+      // If no results from backend and we should fallback to sample data
+      if ((!players || players.length === 0) && process.env.EXPO_PUBLIC_FALLBACK_TO_SAMPLE === 'true') {
+        console.log('No results from backend, falling back to sample data');
+        players = filterSamplePlayers(searchQuery, positionFilter);
+      }
+      
+      setRealPlayers(players);
+      
+    } catch (error) {
+      console.error('Error loading players from backend:', error);
+      setBackendError(error.message);
+      
+      // Fallback to sample data if backend fails
+      if (process.env.EXPO_PUBLIC_FALLBACK_TO_SAMPLE === 'true') {
+        console.log('Backend failed, falling back to sample data');
+        const players = filterSamplePlayers(searchQuery, positionFilter);
+        setRealPlayers(players);
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }, [selectedSport]);
+
+  // ADDED: Filter sample players function
+  const filterSamplePlayers = useCallback((searchQuery = '', positionFilter = 'all', teamFilter = 'all') => {
+    const sportPlayers = samplePlayers[selectedSport] || [];
+    
+    let filteredPlayers = sportPlayers;
+    
+    // Apply position filter
+    if (positionFilter !== 'all') {
+      filteredPlayers = filteredPlayers.filter(player => {
+        if (selectedSport === 'NFL' || selectedSport === 'MLB') {
+          return player.position === positionFilter;
+        } else {
+          return player.position.includes(positionFilter) || player.position.split('/').includes(positionFilter);
+        }
+      });
+    }
+    
+    // Apply team filter
+    if (teamFilter !== 'all') {
+      const team = teams[selectedSport]?.find(t => t.id === teamFilter);
+      if (team) {
+        filteredPlayers = filteredPlayers.filter(player => 
+          player.team === team.name
+        );
+      }
+    }
+    
+    // Apply search filter
+    if (searchQuery) {
+      const searchLower = searchQuery.toLowerCase().trim();
+      console.log(`Searching for: "${searchLower}" in ALL ${sportPlayers.length} players`);
+      
+      // Split search into keywords
+      const searchKeywords = searchLower.split(/\s+/).filter(keyword => keyword.length > 0);
+      console.log('Search keywords:', searchKeywords);
+      
+      // First, try exact search for team names (like "Kansas City Chiefs")
+      let teamSearchResults = [];
+      if (searchKeywords.length >= 2) {
+        // Try to find team names (like "Kansas City Chiefs")
+        const possibleTeamName = searchKeywords.join(' ');
+        teamSearchResults = sportPlayers.filter(player => 
+          player.team.toLowerCase().includes(possibleTeamName)
+        );
+        console.log(`Team search for "${possibleTeamName}": ${teamSearchResults.length} results`);
+      }
+      
+      // If we found exact team matches, use those
+      if (teamSearchResults.length > 0) {
+        filteredPlayers = teamSearchResults;
+      } else {
+        // Otherwise, search by keywords
+        filteredPlayers = sportPlayers.filter(player => {
+          const playerName = player.name.toLowerCase();
+          const playerTeam = player.team.toLowerCase();
+          const playerPosition = player.position ? player.position.toLowerCase() : '';
+          
+          // Check each keyword
+          for (const keyword of searchKeywords) {
+            // Skip very common words that don't help
+            const commonWords = ['player', 'players', 'stats', 'stat', 'statistics', 'points', 'yards', 'touchdowns', 'assists', 'rebounds'];
+            if (commonWords.includes(keyword)) {
+              continue;
+            }
+            
+            // Check if keyword matches any player property
+            if (
+              playerName.includes(keyword) ||
+              playerTeam.includes(keyword) ||
+              playerPosition.includes(keyword) ||
+              playerTeam.split(' ').some(word => word.includes(keyword)) ||
+              playerName.split(' ').some(word => word.includes(keyword))
+            ) {
+              console.log(`✓ Player ${player.name}: matched keyword "${keyword}"`);
+              return true;
+            }
+          }
+          
+          // If we have multiple keywords, require at least one match
+          if (searchKeywords.length > 0) {
+            // Check if we skipped all keywords (all were common words)
+            const nonCommonKeywords = searchKeywords.filter(kw => 
+              !['player', 'players', 'stats', 'stat', 'statistics', 'points', 'yards', 'touchdowns', 'assists', 'rebounds'].includes(kw)
+            );
+            
+            if (nonCommonKeywords.length === 0) {
+              // If all keywords were common words, show all players
+              console.log(`Player ${player.name}: all keywords were common words, showing anyway`);
+              return true;
+            }
+            
+            console.log(`✗ Player ${player.name}: no matches`);
+            return false;
+          }
+          
+          return true;
+        });
+      }
+      
+      console.log(`Found ${filteredPlayers.length} players after search`);
+      
+      // If no results, try fuzzy matching on first non-common keyword
+      if (filteredPlayers.length === 0 && searchKeywords.length > 0) {
+        console.log('Trying fuzzy search...');
+        const nonCommonKeywords = searchKeywords.filter(kw => 
+          !['player', 'players', 'stats', 'stat', 'statistics', 'points', 'yards', 'touchdowns', 'assists', 'rebounds'].includes(kw)
+        );
+        
+        if (nonCommonKeywords.length > 0) {
+          const mainKeyword = nonCommonKeywords[0];
+          console.log(`Fuzzy searching for: "${mainKeyword}"`);
+          
+          filteredPlayers = sportPlayers.filter(player => {
+            const playerName = player.name.toLowerCase();
+            const playerTeam = player.team.toLowerCase();
+            const playerPosition = player.position ? player.position.toLowerCase() : '';
+            
+            // Check if main keyword appears anywhere
+            const matches = 
+              playerName.includes(mainKeyword) ||
+              playerTeam.includes(mainKeyword) ||
+              playerPosition.includes(mainKeyword) ||
+              playerName.split(' ').some(word => word.startsWith(mainKeyword.substring(0, 3))) ||
+              playerTeam.split(' ').some(word => word.startsWith(mainKeyword.substring(0, 3)));
+            
+            if (matches) {
+              console.log(`✓ Player ${player.name}: fuzzy matched "${mainKeyword}"`);
+            }
+            return matches;
+          });
+          
+          console.log(`Found ${filteredPlayers.length} players after fuzzy search`);
+        }
+      }
+    }
+    
+    console.log(`Sample data filtered: ${filteredPlayers.length} players`);
+    return filteredPlayers;
+  }, [selectedSport]);
 
   const getMockPlayerData = () => {
     switch(selectedSport) {
@@ -897,6 +1156,7 @@ export default function AnalyticsScreen({ navigation, route }) {
   };
 
   const handlePromptSelect = (prompt) => {
+    setSearchInput(prompt);
     setSearchQuery(prompt);
     handleAnalyticsSearch(prompt);
     
@@ -1156,6 +1416,7 @@ export default function AnalyticsScreen({ navigation, route }) {
   const currentSportData = getRealSportData();
 
   const handleAnalyticsSearch = (query) => {
+    setSearchInput(query);
     setSearchQuery(query);
     addToSearchHistory(query);
     
@@ -1270,6 +1531,39 @@ export default function AnalyticsScreen({ navigation, route }) {
     }
   };
 
+  // ADDED: Team selector component
+  const renderTeamSelector = () => (
+    <View style={styles.teamSection}>
+      <Text style={styles.teamSectionTitle}>Filter by Team</Text>
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false}
+        style={styles.teamSelector}
+      >
+        <TouchableOpacity
+          style={[styles.teamPill, selectedTeam === 'all' && styles.activeTeamPill]}
+          onPress={() => setSelectedTeam('all')}
+        >
+          <Text style={[styles.teamText, selectedTeam === 'all' && styles.activeTeamText]}>
+            All Teams
+          </Text>
+        </TouchableOpacity>
+        
+        {teams[selectedSport]?.map(team => (
+          <TouchableOpacity
+            key={team.id}
+            style={[styles.teamPill, selectedTeam === team.id && styles.activeTeamPill]}
+            onPress={() => setSelectedTeam(team.id)}
+          >
+            <Text style={[styles.teamText, selectedTeam === team.id && styles.activeTeamText]}>
+              {team.name.split(' ').pop()} {/* Show just last name */}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
+
   const renderSearchResults = () => {
     if (filteredData.length === 0 || !searchQuery.trim()) return null;
     
@@ -1286,6 +1580,7 @@ export default function AnalyticsScreen({ navigation, route }) {
           <TouchableOpacity 
             onPress={() => {
               setSearchQuery('');
+              setSearchInput('');
               setFilteredData([]);
             }}
           >
@@ -1401,22 +1696,25 @@ export default function AnalyticsScreen({ navigation, route }) {
     </View>
   );
 
-  // NEW: Search Bar Component
+  // UPDATED: Search Bar Component with search history integration
   const renderSearchBar = () => {
     if (!showSearch) return null;
 
     return (
       <>
-        <SearchBar
-          placeholder="Search analytics, predictions, or trends..."
-          onSearch={handleAnalyticsSearch}
-          searchHistory={searchHistory}
-          style={styles.homeSearchBar}
-          onClose={() => {
-            setShowSearch(false);
-            setSearchQuery('');
-          }}
-        />
+        <View style={styles.searchContainer}>
+          <TextInput
+            value={searchInput}
+            onChangeText={setSearchInput}
+            onSubmitEditing={handleSearchSubmit}
+            placeholder="Search analytics, predictions, or trends..."
+            style={styles.searchInput}
+            placeholderTextColor="#94a3b8"
+          />
+          <TouchableOpacity onPress={handleSearchSubmit} style={styles.searchButton}>
+            <Ionicons name="search" size={20} color="#000" />
+          </TouchableOpacity>
+        </View>
         
         {searchQuery.trim() && filteredData.length > 0 && (
           <View style={styles.searchResultsInfo}>
@@ -1424,7 +1722,11 @@ export default function AnalyticsScreen({ navigation, route }) {
               {filteredData.length} result{filteredData.length !== 1 ? 's' : ''} found
             </Text>
             <TouchableOpacity 
-              onPress={() => setSearchQuery('')}
+              onPress={() => {
+                setSearchQuery('');
+                setSearchInput('');
+                setFilteredData([]);
+              }}
               activeOpacity={0.7}
             >
               <Text style={styles.clearSearchText}>Clear</Text>
@@ -1695,6 +1997,13 @@ export default function AnalyticsScreen({ navigation, route }) {
           </Text>
         </View>
       </View>
+      
+      {/* ADDED: Debug display for search and filter */}
+      <View style={{paddingHorizontal: 16, marginBottom: 8}}>
+        <Text style={{color: 'white', fontSize: 12}}>
+          DEBUG: Search = "{searchQuery}", Team Filter = "{selectedTeam}"
+        </Text>
+      </View>
     </View>
   );
 
@@ -1934,6 +2243,20 @@ export default function AnalyticsScreen({ navigation, route }) {
   );
 
   const renderContent = () => {
+    // ADDED: Backend error display
+    if (backendError) {
+      return (
+        <View style={styles.errorContainer}>
+          <Ionicons name="warning" size={48} color="#ef4444" />
+          <Text style={styles.errorText}>Backend Error: {backendError}</Text>
+          <Text style={styles.errorSubtext}>Using sample data instead.</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={initializeData}>
+            <Text style={styles.retryButtonText}>Retry Backend Connection</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
     if (currentSportData.error) {
       return (
         <View style={styles.errorContainer}>
@@ -1961,6 +2284,7 @@ export default function AnalyticsScreen({ navigation, route }) {
         return (
           <>
             {renderOverview()}
+            {renderTeamSelector()}
             {renderTrendingStats()}
             {renderPredictionGenerator()}
             {renderAIPromptSection()}
@@ -2250,34 +2574,26 @@ const styles = StyleSheet.create({
     marginTop: 5,
     fontWeight: '500',
   },
-  refreshIndicator: {
+  // ADDED: Search Container Styles
+  searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    backgroundColor: '#ffffff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    marginBottom: 12,
   },
-  refreshText: {
-    fontSize: 13,
-    color: '#4b5563',
-    marginLeft: 8,
-    fontWeight: '500',
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1f2937',
+    paddingVertical: 8,
   },
-  refreshButton: {
-    marginLeft: 12,
-    padding: 4,
-    backgroundColor: '#f3f4f6',
-    borderRadius: 8,
-  },
-  refreshIcon: {
-    padding: 4,
+  searchButton: {
+    padding: 8,
   },
   searchSection: {
     marginTop: 16,
@@ -2444,6 +2760,43 @@ const styles = StyleSheet.create({
   fantasyResultTime: {
     fontSize: 12,
     color: '#9ca3af',
+  },
+  // ADDED: Team Selector Styles
+  teamSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#1e293b',
+    marginHorizontal: 20,
+    marginBottom: 16,
+    borderRadius: 12,
+  },
+  teamSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#94a3b8',
+    marginBottom: 8,
+  },
+  teamSelector: {
+    height: 40,
+  },
+  teamPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#334155',
+    marginRight: 8,
+  },
+  activeTeamPill: {
+    backgroundColor: '#3b82f6',
+  },
+  teamText: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  activeTeamText: {
+    color: '#fff',
+    fontWeight: 'bold',
   },
   // NEW: Sport Selector
   sportSelector: {
@@ -3220,5 +3573,34 @@ const styles = StyleSheet.create({
     width: 20,
     height: 2,
     backgroundColor: '#e5e7eb',
+  },
+  refreshIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  refreshText: {
+    fontSize: 13,
+    color: '#4b5563',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  refreshButton: {
+    marginLeft: 12,
+    padding: 4,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 8,
+  },
+  refreshIcon: {
+    padding: 4,
   },
 });
