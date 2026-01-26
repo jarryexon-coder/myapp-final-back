@@ -3,14 +3,14 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "expo start",
+    "start": "expo start --web",
+    "dev": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "test:backend": "node scripts/test-backend-connection.js",
-    "test:backend:ci": "node scripts/test-backend-connection.js --url=https://your-production-backend.com",
-    "test:backend:full": "node scripts/test-backend-connection.js --suites=basic,core,data,services",
-    "verify:connection": "react-native run-ios --simulator='iPhone 14' --scheme='BackendTest'"
+    "railway": "expo start --web",
+    "build:web": "expo export:web",
+    "test:backend": "node scripts/test-backend-connection.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -28,8 +28,7 @@
     "react-native-gesture-handler": "~2.28.0",
     "react-native-reanimated": "~4.1.1",
     "react-native-safe-area-context": "~5.6.0",
-    "react-native-screens": "~4.16.0",
-    "react-native-worklets": "0.5.1"
+    "react-native-screens": "~4.16.0"
   },
   "private": true,
   "devDependencies": {
