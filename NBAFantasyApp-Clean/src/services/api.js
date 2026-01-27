@@ -337,6 +337,108 @@ const generateMockExportLineup = (lineupId, format = 'csv') => {
   return new Blob([sampleData], { type: format === 'csv' ? 'text/csv' : 'application/json' });
 };
 
+// =============================================
+// === ENHANCED FETCH WITH FALLBACKS (File 3) ===
+// =============================================
+
+// Enhanced fetch with monitoring and fallbacks
+async function fetchWithFallbacks(endpoint, options = {}, fallbackEndpoints = [], mockFallback) {
+  const sources = [
+    { 
+      name: 'primary', 
+      url: `${BASE_URL}${endpoint}`,
+      priority: 1 
+    },
+    ...fallbackEndpoints.map((ep, i) => ({ 
+      name: `fallback_${i}`, 
+      url: ep,
+      priority: 2 + i 
+    }))
+  ];
+  
+  // Sort by priority
+  sources.sort((a, b) => a.priority - b.priority);
+  
+  for (const source of sources) {
+    try {
+      console.log(`Trying ${source.name}: ${source.url}`);
+      const startTime = Date.now();
+      
+      const response = await fetch(source.url, {
+        ...options,
+        signal: AbortSignal.timeout(8000) // 8 second timeout
+      });
+      
+      const responseTime = Date.now() - startTime;
+      
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Track successful fetch
+        await trackDataUsage(endpoint, source.name, responseTime, true);
+        
+        return {
+          ...data,
+          _metadata: {
+            source: source.name,
+            responseTime,
+            timestamp: new Date().toISOString()
+          }
+        };
+      } else {
+        console.warn(`${source.name} returned ${response.status}`);
+      }
+    } catch (error) {
+      console.warn(`${source.name} failed:`, error.message);
+      continue;
+    }
+  }
+  
+  // All real sources failed, try mock
+  console.warn(`All real sources failed for ${endpoint}, using mock`);
+  await trackDataUsage(endpoint, 'mock', 0, false);
+  
+  if (typeof mockFallback === 'function') {
+    return mockFallback();
+  }
+  
+  return mockFallback;
+}
+
+// Track data usage
+async function trackDataUsage(endpoint, source, responseTime, success) {
+  try {
+    // Send to your analytics endpoint
+    await fetch(`${BASE_URL}/api/analytics/usage`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getAuthToken()}`
+      },
+      body: JSON.stringify({
+        endpoint,
+        source,
+        responseTime,
+        success,
+        timestamp: new Date().toISOString(),
+        userId: getCurrentUser()?.id
+      })
+    });
+  } catch (error) {
+    // Silently fail - analytics shouldn't break the app
+    console.log('Analytics tracking failed:', error.message);
+  }
+}
+
+// Helper function to get current user
+function getCurrentUser() {
+  // Mock implementation - you should replace with actual user retrieval
+  return {
+    id: 'mock_user_123',
+    email: 'demo@example.com'
+  };
+}
+
 const apiService = {
   // === AUTHENTICATION & USER METHODS (Enhanced from File 1) ===
   
@@ -598,15 +700,55 @@ const apiService = {
     };
   },
 
-  // === NBA FUNCTIONS ===
+  // === ENHANCED NBA FUNCTIONS WITH FALLBACKS ===
   async getNBAGames() {
-    console.log('🏀 Using enhanced NBA mock data');
-    return getNBAGames();
+    console.log('🏀 Fetching NBA games with fallbacks');
+    
+    const fallbackEndpoints = [
+      'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',
+      'https://data.nba.net/data/10s/prod/v1/today.json'
+    ];
+    
+    try {
+      const result = await fetchWithFallbacks(
+        '/api/nba/games',
+        {},
+        fallbackEndpoints,
+        () => {
+          console.warn('Using mock NBA games');
+          return getNBAGames();
+        }
+      );
+      return result;
+    } catch (error) {
+      console.error('Error fetching NBA games:', error);
+      return getNBAGames();
+    }
   },
 
   async getNBAStandings() {
-    console.log('🏀 Using enhanced NBA standings mock data');
-    return getNBAStandings();
+    console.log('🏀 Fetching NBA standings with fallbacks');
+    
+    const fallbackEndpoints = [
+      'https://site.web.api.espn.com/apis/v2/sports/basketball/nba/standings',
+      'https://data.nba.net/data/10s/prod/v1/current/standings_all.json'
+    ];
+    
+    try {
+      const result = await fetchWithFallbacks(
+        '/api/nba/standings',
+        {},
+        fallbackEndpoints,
+        () => {
+          console.warn('Using mock NBA standings');
+          return getNBAStandings();
+        }
+      );
+      return result;
+    } catch (error) {
+      console.error('Error fetching NBA standings:', error);
+      return getNBAStandings();
+    }
   },
 
   async getNBAPlayerStats(playerId) {
@@ -634,7 +776,7 @@ const apiService = {
     };
   },
 
-  // === NHL FUNCTIONS ===
+  // === NHL FUNCTIONS WITH FALLBACKS ===
   async getNHLGames() {
     console.log('🏒 Using NHL mock data');
     return getNHLGames();
@@ -1832,7 +1974,11 @@ const apiService = {
       },
       source: 'mock'
     };
-  }
+  },
+
+  // === ENHANCED FETCH METHOD (From File 3) ===
+  fetchWithFallbacks,
+  trackDataUsage
 };
 
 export default apiService;

@@ -1,42 +1,76 @@
 // src/components/ProtectedRoute.js
 import React from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { useAuth } from '../hooks/useAuth'; // Import from hook directly
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { useAuth } from '../contexts/AuthContext';
 
-const ProtectedRoute = ({ children, requireAdmin = false }) => {
-  const { user, isLoading, checkAdminStatus } = useAuth();
+const ProtectedRoute = ({ children, requireAdmin = false, requirePremium = false }) => {
+  const { user, loading, isAuthenticated } = useAuth();
 
-  if (isLoading) {
+  if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3b82f6" />
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.text}>Loading...</Text>
       </View>
     );
   }
 
-  if (!user) {
-    // In React Native, we typically handle this via navigation
-    // You might want to use navigation.replace('Login') here
-    // For now, we'll return null and let the navigator handle redirection
-    return null;
+  if (!isAuthenticated) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>🔒 Authentication Required</Text>
+        <Text style={styles.text}>
+          Please log in to access this feature
+        </Text>
+      </View>
+    );
   }
 
-  if (requireAdmin && !checkAdminStatus()) {
-    // Admin access required but user is not admin
-    // You can show an alert or navigate back
-    return null;
+  if (requireAdmin && user?.role !== 'admin') {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>🚫 Admin Access Required</Text>
+        <Text style={styles.text}>
+          This feature is only available to administrators
+        </Text>
+      </View>
+    );
   }
 
-  return <>{children}</>;
+  if (requirePremium && !(user?.role === 'premium' || user?.role === 'admin')) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>⭐ Premium Feature</Text>
+        <Text style={styles.text}>
+          Upgrade to premium to access this feature
+        </Text>
+      </View>
+    );
+  }
+
+  return children;
 };
 
 const styles = StyleSheet.create({
-  loadingContainer: {
+  container: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0f172a',
+    padding: 20,
+    backgroundColor: '#f5f5f5'
   },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: '#333'
+  },
+  text: {
+    fontSize: 16,
+    textAlign: 'center',
+    color: '#666',
+    marginBottom: 20
+  }
 });
 
 export default ProtectedRoute;

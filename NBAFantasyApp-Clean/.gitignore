@@ -1,40 +1,51 @@
-# Created for React Native/Expo NBA Fantasy App
-
 # Dependencies
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
 # Expo
 .expo/
 .expo-shared/
-web-build/
+.expo/**
+
+# Build outputs
 dist/
+build/
+*.expo.*
+*.tsbuildinfo
 
-# Android
-android/.gradle/
-android/build/
-android/local.properties
-android/*.apk
-android/*.ap_
-android/*.aab
+# Coverage
+coverage/
+*.lcov
 
-# iOS
-ios/build/
-ios/Pods/
-*.xcworkspace
-*.pbxuser
-*.mode1v3
-*.mode2v3
-*.moved-aside
-*.xcuserstate
+# Misc
+.DS_Store
+*.pem
+*.p12
+*.key
+*.csr
+*.crt
+*.cer
 
-# Environment
-.env
-.env.local
-.env*.local
-.env.production
+# Logs
+logs/
+*.log
+
+# Runtime data
+tmp/
+temp/
+
+# Backup files
+*.backup
+*.bak
 
 # IDE
 .vscode/
@@ -42,17 +53,10 @@ ios/Pods/
 *.swp
 *.swo
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Backup files
-*.backup
-*.backup_*
-*backup_*
-App.js.backup*
-App.tsx.backup
-
-# Test/analysis files
-reports/
-*.log
+# Platform specific
+ios/Pods/
+ios/build/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
