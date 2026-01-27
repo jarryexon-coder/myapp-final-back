@@ -1,62 +1,16 @@
-# Dependencies
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Environment variables
-.env
+# Secrets
+revenuecat-key.json
+*.env
 .env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.production
 
-# Expo
+# Build directories
+node_modules/
 .expo/
-.expo-shared/
-.expo/**
-
-# Build outputs
 dist/
 build/
-*.expo.*
-*.tsbuildinfo
-
-# Coverage
-coverage/
-*.lcov
-
-# Misc
-.DS_Store
-*.pem
-*.p12
-*.key
-*.csr
-*.crt
-*.cer
-
-# Logs
-logs/
 *.log
 
-# Runtime data
-tmp/
-temp/
-
-# Backup files
-*.backup
-*.bak
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Platform specific
-ios/Pods/
-ios/build/
-android/.gradle/
-android/build/
-android/app/build/
-android/local.properties
+# OS files
+.DS_Store
+Thumbs.db
