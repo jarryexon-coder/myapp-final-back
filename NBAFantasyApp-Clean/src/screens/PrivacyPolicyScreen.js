@@ -1,5 +1,6 @@
 import React from 'react';
-import { ScrollView, Text, StyleSheet, SafeAreaView, Linking } from 'react-native';
+import { ScrollView, Text, StyleSheet, Linking } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const PrivacyPolicyScreen = () => {
