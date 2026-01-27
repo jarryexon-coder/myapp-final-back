@@ -5,9 +5,9 @@
     "buildCommand": "npm run build"
   },
   "deploy": {
-    "startCommand": "echo \"$GCP_SERVICE_ACCOUNT_JSON\" > /tmp/gcp-key.json && echo \"$FIREBASE_CREDENTIALS_JSON\" > /tmp/firebase-key.json && npm start",
-    "healthcheckPath": "/health",
-    "healthcheckTimeout": 300,
+    "startCommand": "npx serve dist -p $PORT",
+    "healthcheckPath": "/",
+    "healthcheckTimeout": 5,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3
   }
