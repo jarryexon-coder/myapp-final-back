@@ -1,0 +1,14 @@
+@@ -449,10 +449,10 @@
+     try {
+       console.log('🎮 Fetching live games data...');
+       const response = await apiService.getLiveGames();
+-      if (response.data.nba && response.data.nba.length > 0) {
+-        setLiveGames(response.data.nba);
++      if (response && response.length > 0) {
++        setLiveGames(response);
+         setStats(prev => ({
+           ...prev,
+-          liveGames: response.data.nba.length
++          liveGames: response.length
+         }));
+       } else {
