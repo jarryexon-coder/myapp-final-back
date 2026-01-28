@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { Platform } from 'react-native';
-import { AnalyticsService } from '../services/firebase-config';
+import { AnalyticsService } from '../services/firebase';
 
 export const useAnalytics = () => {
   const logEvent = useCallback(async (eventName, eventParams = {}) => {

@@ -1,4 +1,4 @@
-// src/screens/PredictionsScreen.js
+import { logAnalyticsEvent, logScreenView } from '../services/firebase';// src/screens/PredictionsScreen.js
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
@@ -54,19 +54,6 @@ const logAnalyticsEvent = async (eventName, eventParams = {}) => {
     if (Platform.OS === 'web' && !__DEV__ && typeof window !== 'undefined') {
       try {
         const firebaseApp = await import('firebase/app');
-        const firebaseAnalytics = await import('firebase/analytics');
-        
-        let app;
-        if (firebaseApp.getApps().length === 0) {
-          const firebaseConfig = {
-            apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || "AIzaSyCi7YQ-vawFT3sIr1i8yuhhx-1vSplAneA",
-            authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || "nba-fantasy-ai.firebaseapp.com",
-            projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "nba-fantasy-ai",
-            storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || "nba-fantasy-ai.appspot.com",
-            messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "718718403866",
-            appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || "1:718718403866:web:e26e10994d62799a048379",
-            measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID || "G-BLTPX9LJ7K"
-          };
           
           app = firebaseApp.initializeApp(firebaseConfig);
         } else {

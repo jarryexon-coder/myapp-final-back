@@ -1,47 +1,34 @@
-// src/services/firebase.js
-import { Platform } from 'react-native';
-import Constants from 'expo-constants';
+// Centralized Firebase service imports
+// This file re-exports the services from our main Firebase config
 
-// CORRECT: Simple, reliable environment detection
-const isExpoGo = Constants.appOwnership === 'expo';
-const isDevelopmentBuild = Constants.appOwnership === 'standalone' && __DEV__;
+import { app, auth, db, storage, checkFirebaseStatus } from '../firebase/firebase-config-simple';
 
-console.log(`[Firebase Service] Environment: Expo Go=${isExpoGo}, Dev Build=${isDevelopmentBuild}`);
+// Re-export everything
+export { app, auth, db, storage, checkFirebaseStatus };
 
-let firebaseAnalytics = null;
-
-// Always use mock for now to prevent crashes
-console.log('🎭 Using mock Firebase Analytics (fallback)');
-
-// Create a simple mock analytics object
-firebaseAnalytics = {
-  logEvent: async (eventName, params = {}) => {
-    console.log(`[Mock Analytics] Event: ${eventName}`, params);
+// Analytics stub for React Native/Expo Go
+const AnalyticsService = {
+  logEvent: (name, params) => {
+    console.log('[Analytics Event]:', name, params);
     return Promise.resolve();
   },
-  setCurrentScreen: async (screenName, screenClass = null) => {
-    console.log(`[Mock Analytics] Screen: ${screenName}`, screenClass);
-    return Promise.resolve();
-  }
+  setUserProperty: (key, value) => {
+    console.log('[User Property]:', key, value);
+  },
+  getEvents: () => [],
+  clearEvents: () => {}
 };
 
-// Export logging functions
-export const logAnalyticsEvent = (eventName, params = {}) => {
-  try {
-    console.log(`📊 Analytics Event: ${eventName}`, params);
-    return firebaseAnalytics.logEvent(eventName, params);
-  } catch (error) {
-    console.log(`[Analytics Error] ${eventName}:`, error);
-    return Promise.resolve();
-  }
+export { AnalyticsService };
+
+// Helper functions for screens
+export const logAnalyticsEvent = (eventName, eventParams = {}) => {
+  return AnalyticsService.logEvent(eventName, eventParams);
 };
 
-export const logScreenView = (screenName, screenClass = null) => {
-  try {
-    console.log(`📱 Screen View: ${screenName}`);
-    return firebaseAnalytics.setCurrentScreen(screenName, screenClass);
-  } catch (error) {
-    console.log(`[Screen View Error] ${screenName}:`, error);
-    return Promise.resolve();
-  }
+export const logScreenView = (screenName, params = {}) => {
+  return logAnalyticsEvent('screen_view', {
+    screen_name: screenName,
+    ...params,
+  });
 };
