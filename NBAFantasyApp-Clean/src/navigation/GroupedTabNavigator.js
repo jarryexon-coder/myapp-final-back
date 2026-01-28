@@ -31,7 +31,7 @@ import BackendTestScreen from '../screens/BackendTestScreen';
 
 // Import NEW screens
 import PrizePicksScreen from '../screens/PrizePicksScreen';
-import LoginScreen from '../screens/LoginScreen-enhanced';
+import LoginScreenEnhanced from '../screens/LoginScreen-enhanced';
 import DiagnosticScreen from '../screens/DiagnosticScreen'; // NEW
 
 // Create stack navigators
@@ -199,7 +199,7 @@ function AuthStackScreen() {
     >
       <AuthStack.Screen 
         name="Login" 
-        component={LoginScreen} 
+        component={LoginScreenEnhanced} 
       />
     </AuthStack.Navigator>
   );
