@@ -1,9 +1,10 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/FantasyHubScreen.js - COMPLETE UPDATED VERSION
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator,
   RefreshControl, TouchableOpacity, Dimensions, Platform, FlatList,
-  Modal, SafeAreaView, Alert, Share, Clipboard
+  Modal, Alert, Share, Clipboard
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -840,7 +841,7 @@ export default function FantasyScreen({ route }) {
   const fetchSnakeDraft = async (position) => {
     setIsGeneratingDraft(true);
     try {
-      // Mock data for now - replace with actual API call
+      // Development data
       const mockResults = {
         success: true,
         draftPosition: position,
@@ -911,7 +912,7 @@ export default function FantasyScreen({ route }) {
   const fetchTurnDraft = async (position) => {
     setIsGeneratingDraft(true);
     try {
-      // Mock data for now - replace with actual API call
+      // Development data
       const positions = ['PG', 'SG', 'SF', 'PF', 'C'];
       const results = {};
       

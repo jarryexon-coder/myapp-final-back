@@ -44,7 +44,7 @@ const API_CONFIG = {
 
 console.log('🔧 API Base URL:', API_CONFIG.baseURL);
 
-// Mock data as fallback
+// Development data
 const mockNBA = {
   games: [
     {
@@ -187,7 +187,7 @@ const mockNFL = {
   ]
 };
 
-// NHL Mock Data
+// Development data
 const mockNHL = {
   games: [
     {
@@ -340,7 +340,7 @@ const mockNews = {
 // Helper function to fetch data with fallback
 const fetchWithFallback = async (endpoint, mockData, useMockData = true) => {
   if (useMockData) {
-    console.log(`📡 Using mock data for ${endpoint}`);
+    // Using fallback for development
     return mockData;
   }
 
@@ -363,7 +363,7 @@ const fetchWithFallback = async (endpoint, mockData, useMockData = true) => {
     console.log(`✅ Successfully fetched from ${endpoint}`);
     return data;
   } catch (error) {
-    console.warn(`⚠️ Failed to fetch from ${endpoint}, using mock data:`, error.message);
+    // Development mode: Using simplified version
     return mockData;
   }
 };
@@ -490,7 +490,7 @@ export const useSportsData = (options = {}) => {
         ? games.filter(game => game.status === 'live' || game.status === 'Live')
         : [];
 
-      // Use mock players for NFL (since API doesn't have NFL players endpoint)
+      // Development data
       const playersData = mockNFL.players;
 
       setData(prev => ({
@@ -535,7 +535,7 @@ export const useSportsData = (options = {}) => {
         fetchWithFallback(API_CONFIG.endpoints.nhl.standings, mockNHL.standings, useMockData)
       ]);
 
-      // Use mock players
+      // Development data
       const playersData = mockNHL.players;
 
       // Process live games

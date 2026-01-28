@@ -1,4 +1,4 @@
-// src/utils/firebaseMock.js
+// Development data
 export default {
   analytics: () => ({
     logEvent: async (eventName, params = {}) => {

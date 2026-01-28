@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/HomeScreen-fixed.js - WITH CORRECT ICON NAMES
 import React, { useState, useCallback } from 'react';
 import {

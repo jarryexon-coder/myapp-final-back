@@ -16,7 +16,7 @@ export default function ParlayBuilderScreenBasic() {
   const [selectedPicks, setSelectedPicks] = useState([]);
   const [loading, setLoading] = useState(false);
   
-  // Mock data with PROPER unique keys
+  // Development data
   const mockPlayers = [
     { id: 'player-1', name: 'Stephen Curry', team: 'GSW', position: 'PG', sport: 'NBA' },
     { id: 'player-2', name: 'Luka Dončić', team: 'DAL', position: 'PG', sport: 'NBA' },

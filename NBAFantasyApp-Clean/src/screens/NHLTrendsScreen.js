@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/NHLTrendsScreen.js - UPDATED VERSION WITH SEARCH FUNCTIONALITY
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -5,7 +6,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  SafeAreaView,
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
@@ -80,7 +80,7 @@ export default function NHLScreen({ navigation, route }) {
   // Animation for fade-in effect
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  // Mock data
+  // Development data
   const mockStandings = [
     { id: 1, team: 'Boston Bruins', wins: 32, losses: 12, points: 64, conference: 'Eastern' },
     { id: 2, team: 'Toronto Maple Leafs', wins: 30, losses: 14, points: 60, conference: 'Eastern' },
@@ -242,7 +242,7 @@ export default function NHLScreen({ navigation, route }) {
   };
 
   const loadData = () => {
-    // Load mock data immediately without delay
+    // Development data
     setStandings(mockStandings);
     setGames(mockGames);
     setPlayers(mockPlayers);

@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -28,7 +29,7 @@ const LiveGamesScreenEnhanced = ({ navigation }) => {
     { id: 'NHL', name: '🏒 NHL', icon: 'ice-hockey' },
   ];
 
-  // Mock data for different sports
+  // Development data
   const mockGames = {
     NBA: [
       { id: 1, home: 'Lakers', away: 'Celtics', score: '102-98', status: 'LIVE', quarter: '4th', time: '2:34' },

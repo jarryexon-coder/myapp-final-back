@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/DiagnosticScreen.js
 import React, { useState } from 'react';
 import {
@@ -7,7 +8,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  SafeAreaView
 } from 'react-native';
 import { useBackendConnectivity } from '../hooks/useBackendConnectivity';
 

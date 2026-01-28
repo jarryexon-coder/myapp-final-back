@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { logAnalyticsEvent, logScreenView } from '../services/firebase';// src/screens/PredictionsScreen.js
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -55,14 +56,13 @@ const logAnalyticsEvent = async (eventName, eventParams = {}) => {
       try {
         const firebaseApp = await import('firebase/app');
           
-          app = firebaseApp.initializeApp(firebaseConfig);
         } else {
           app = firebaseApp.getApp();
         }
         
-        const analytics = firebaseAnalytics.getAnalytics(app);
+        const analytics = firebaseAnalytics.;
         if (analytics) {
-          await firebaseAnalytics.logEvent(analytics, eventName, eventParams);
+          await firebaseAnalytics.logEvent(eventName, eventParams);
         }
       } catch (firebaseError) {
         // Firebase analytics error - fail silently in production

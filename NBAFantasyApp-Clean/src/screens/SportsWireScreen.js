@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
@@ -14,7 +15,6 @@ import {
   TextInput,
   FlatList,
   Modal,
-  SafeAreaView,
   Platform
 } from 'react-native';
 import ProgressBar from '../components/TempProgressBar';
@@ -181,7 +181,7 @@ const SportsNewsHub = () => {
     }
   };
 
-  // Enhanced mock articles with analytics data
+  // Development data
   const mockNewsArticles = Array.from({ length: 50 }, (_, i) => {
     const categoriesList = ['analytics', 'injuries', 'trades', 'rosters', 'draft'];
     const randomCategory = categoriesList[Math.floor(Math.random() * categoriesList.length)];

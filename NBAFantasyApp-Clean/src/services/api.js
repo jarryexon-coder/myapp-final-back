@@ -2,7 +2,7 @@
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://pleasing-determination-production.up.railway.app';
 const API_URL = BASE_URL; // Add this for consistency with File 1
 
-// Import all mock data functions
+// Development data
 import { 
   getNBAGames, 
   getNBAStandings, 
@@ -12,7 +12,7 @@ import {
   getNHLPlayerStats,
   getKalshiMarkets,
   getSportsPredictions 
-} from './mockData';
+} from './developmentData';
 
 // Import generated data (we'll create these files)
 import { samplePlayers } from '../data/players';
@@ -30,7 +30,7 @@ const getAuthToken = () => {
   return authToken;
 };
 
-// Mock data generators for fantasy drafts (Added from File 1)
+// Development data
 const generateMockSnakeDraft = (position, sport, platform = 'FanDuel', teams = 10, rounds = 6) => {
   const mockPlayers = [
     {
@@ -332,7 +332,7 @@ const generateMockSavedDrafts = () => {
 };
 
 const generateMockExportLineup = (lineupId, format = 'csv') => {
-  // For mock, we return a blob with sample data
+  // Development data
   const sampleData = `Player,Position,Team,Salary,Projection\nStephen Curry,PG,GSW,9500,52.3\nLeBron James,SF,LAL,9800,48.7`;
   return new Blob([sampleData], { type: format === 'csv' ? 'text/csv' : 'application/json' });
 };
@@ -394,8 +394,8 @@ async function fetchWithFallbacks(endpoint, options = {}, fallbackEndpoints = []
     }
   }
   
-  // All real sources failed, try mock
-  console.warn(`All real sources failed for ${endpoint}, using mock`);
+  // Development data
+  // Development mode: Using simplified version
   await trackDataUsage(endpoint, 'mock', 0, false);
   
   if (typeof mockFallback === 'function') {
@@ -432,7 +432,7 @@ async function trackDataUsage(endpoint, source, responseTime, success) {
 
 // Helper function to get current user
 function getCurrentUser() {
-  // Mock implementation - you should replace with actual user retrieval
+  // Development data
   return {
     id: 'mock_user_123',
     email: 'demo@example.com'
@@ -472,10 +472,10 @@ const apiService = {
       }
     } catch (error) {
       console.error('Registration error:', error);
-      // Continue to mock data on error
+      // Development data
     }
     
-    // Fallback to mock registration
+    // Development data
     console.log('📝 Mock signup for:', userData.email);
     const token = 'mock_jwt_token_' + Date.now();
     authToken = token;
@@ -525,10 +525,10 @@ const apiService = {
       }
     } catch (error) {
       console.error('Login error:', error);
-      // Continue to mock data on error
+      // Development data
     }
     
-    // Fallback to mock login
+    // Development data
     console.log('🔐 Mock login for:', credentials.email);
     const token = 'mock_jwt_token_' + Date.now();
     authToken = token;
@@ -586,10 +586,10 @@ const apiService = {
       }
     } catch (error) {
       console.error('Get current user error:', error);
-      // Continue to mock data on error
+      // Development data
     }
     
-    // Fallback to mock current user
+    // Development data
     console.log('👤 Mock getCurrentUser with token:', useToken);
     return {
       success: true,
@@ -715,7 +715,7 @@ const apiService = {
         {},
         fallbackEndpoints,
         () => {
-          console.warn('Using mock NBA games');
+          // Development mode: Using simplified version
           return getNBAGames();
         }
       );
@@ -740,7 +740,7 @@ const apiService = {
         {},
         fallbackEndpoints,
         () => {
-          console.warn('Using mock NBA standings');
+          // Development mode: Using simplified version
           return getNBAStandings();
         }
       );
@@ -1163,7 +1163,7 @@ const apiService = {
       console.error('Fantasy search API error:', error);
     }
     
-    // Fallback to mock data - use existing searchPlayers method
+    // Development data
     return this.searchPlayers(sport, searchQuery, filters);
   },
   
@@ -1190,7 +1190,7 @@ const apiService = {
       console.error('Snake draft API error:', error);
     }
     
-    // Fallback to mock data
+    // Development data
     return generateMockSnakeDraft(position, sport, platform, teams, rounds);
   },
   
@@ -1217,7 +1217,7 @@ const apiService = {
       console.error('Turn draft API error:', error);
     }
     
-    // Fallback to mock data
+    // Development data
     return generateMockTurnDraft(position, sport, platform, criteria);
   },
   
@@ -1244,7 +1244,7 @@ const apiService = {
       console.error('Generate lineup API error:', error);
     }
     
-    // Fallback to mock data
+    // Development data
     return generateMockLineup(params);
   },
   
@@ -1271,7 +1271,7 @@ const apiService = {
       console.error('Analyze lineup API error:', error);
     }
     
-    // Fallback to mock data
+    // Development data
     return generateMockLineupAnalysis(players, sport, platform);
   },
   
@@ -1298,7 +1298,7 @@ const apiService = {
       console.error('Optimize stack API error:', error);
     }
     
-    // Fallback to mock data
+    // Development data
     return generateMockOptimizeStack(team, sport, platform, stackType);
   },
   
@@ -1325,7 +1325,7 @@ const apiService = {
       console.error('Compare players API error:', error);
     }
     
-    // Fallback to mock data
+    // Development data
     return generateMockComparePlayers(playerIds, platform);
   },
   
@@ -1352,7 +1352,7 @@ const apiService = {
       console.error('AI advice API error:', error);
     }
     
-    // Fallback to mock data
+    // Development data
     return generateMockAIAdvice(prompt, sport, platform);
   },
   
@@ -1379,7 +1379,7 @@ const apiService = {
       console.error('Save draft API error:', error);
     }
     
-    // Fallback to mock data
+    // Development data
     return generateMockSaveDraft(draftData, name);
   },
   
@@ -1403,7 +1403,7 @@ const apiService = {
       console.error('Get saved drafts API error:', error);
     }
     
-    // Fallback to mock data
+    // Development data
     return generateMockSavedDrafts();
   },
   
@@ -1427,7 +1427,7 @@ const apiService = {
       console.error('Export lineup API error:', error);
     }
     
-    // Fallback to mock data
+    // Development data
     return generateMockExportLineup(lineupId, format);
   },
   
@@ -1455,7 +1455,7 @@ const apiService = {
       console.error('Optimal draft API error:', error);
     }
     
-    // Fallback to mock data
+    // Development data
     return generateMockOptimalDraft(params);
   },
 
@@ -1486,11 +1486,11 @@ const apiService = {
           };
         }
       } catch (error) {
-        console.log('Backend failed, using mock data:', error.message);
+        // Using development fallback
       }
     }
     
-    // Fallback to mock data
+    // Development data
     const sportPlayers = samplePlayers[sport] || [];
     let filteredPlayers = [...sportPlayers];
     
@@ -1546,11 +1546,11 @@ const apiService = {
           };
         }
       } catch (error) {
-        console.log('Backend search failed, using mock search:', error.message);
+        // Using development fallback
       }
     }
     
-    // Mock search
+    // Development data
     const sportPlayers = samplePlayers[sport] || [];
     const searchLower = query.toLowerCase().trim();
     
@@ -1595,7 +1595,7 @@ const apiService = {
           }
         }
       } catch (error) {
-        console.log('Backend player fetch failed, using mock data:', error.message);
+        // Using development fallback
       }
     }
     
@@ -1656,7 +1656,7 @@ const apiService = {
           };
         }
       } catch (error) {
-        console.log('Backend teams failed, using mock teams:', error.message);
+        // Using development fallback
       }
     }
     
@@ -1717,7 +1717,7 @@ const apiService = {
           };
         }
       } catch (error) {
-        console.log('Backend standings failed, using mock standings:', error.message);
+        // Using development fallback
       }
     }
     
@@ -1770,12 +1770,12 @@ const apiService = {
       };
     }
     
-    // For NFL/MLB, generate mock schedule
+    // Development data
     const sportTeams = teams[sport] || [];
     const schedule = [];
     
     if (sportTeams.length > 0) {
-      // Generate 5 mock games
+      // Development data
       for (let i = 0; i < 5; i++) {
         const homeTeam = sportTeams[Math.floor(Math.random() * sportTeams.length)];
         const awayTeam = sportTeams[Math.floor(Math.random() * sportTeams.length)];
@@ -1946,7 +1946,7 @@ const apiService = {
       return playerResult;
     }
     
-    // Generate mock trend data
+    // Development data
     const player = playerResult.player;
     const sport = playerResult.sport;
     

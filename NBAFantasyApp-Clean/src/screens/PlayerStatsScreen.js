@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/PlayerStatsScreen.js
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -9,7 +10,6 @@ import {
   RefreshControl,
   TouchableOpacity,
   FlatList,
-  SafeAreaView,
   TextInput,
   Dimensions,
   Platform,

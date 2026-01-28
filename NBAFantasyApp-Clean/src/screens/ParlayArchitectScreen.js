@@ -1541,13 +1541,13 @@ export default function ParlayBuilderScreen({ route }) {
     logAnalyticsEvent('parlay_search', { query, results: filtered.length });
   }, [availablePlayers]);
 
-  // Load mock data
+  // Development data
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
       await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // Mock players data
+      // Development data
       const mockPlayers = [
         { id: '1', name: 'Stephen Curry', team: 'GSW', sport: 'NBA', position: 'Points', line: 'Over 31.5', confidence: 88, edge: '+4.7%', category: 'High Probability' },
         { id: '2', name: 'Patrick Mahomes', team: 'KC', sport: 'NFL', position: 'Passing Yards', line: 'Over 285.5', confidence: 82, edge: '+5.2%', category: 'Value Bet' },

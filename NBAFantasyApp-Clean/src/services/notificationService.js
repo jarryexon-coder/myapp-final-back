@@ -2,7 +2,7 @@
 import { Platform } from 'react-native';
 import { authService } from './authService';
 
-// Mock Notifications object since expo-notifications is not installed
+// Development data
 const Notifications = {
   setNotificationHandler: (handler) => {
     console.log('[Mock] setNotificationHandler called');
@@ -38,7 +38,7 @@ const Notifications = {
   }
 };
 
-// Configure notification handling - mock version
+// Development data
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -59,7 +59,7 @@ class NotificationService {
     console.log('🔧 Configuring notifications (mock mode)...');
     
     try {
-      // Request permissions (mock)
+      // Development data
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
       
@@ -73,7 +73,7 @@ class NotificationService {
         return;
       }
 
-      // Get push token (mock)
+      // Development data
       const token = (await Notifications.getExpoPushTokenAsync()).data;
       console.log('📱 Mock push token:', token);
 
@@ -92,7 +92,7 @@ class NotificationService {
 
   async registerPushToken(token) {
     try {
-      // Mock: Just log the token registration
+      // Development data
       console.log('📝 Mock: Push token would be registered with backend:', token);
       
       // If authService is available, you could still call it, but let's not fail if it doesn't exist
@@ -107,7 +107,7 @@ class NotificationService {
     }
   }
 
-  // Schedule a local notification (mock)
+  // Development data
   async scheduleLocalNotification(title, body, data = {}) {
     console.log(`📅 [Mock] Would schedule notification: "${title}" - "${body}"`, data);
     
@@ -128,7 +128,7 @@ class NotificationService {
     }
   }
 
-  // Schedule game reminder (mock)
+  // Development data
   async scheduleGameReminder(game, minutesBefore = 30) {
     console.log(`⏰ [Mock] Would schedule game reminder for: ${game.away_team} vs ${game.home_team}`);
     
@@ -154,14 +154,14 @@ class NotificationService {
     }
   }
 
-  // Cancel all scheduled notifications (mock)
+  // Development data
   async cancelAllScheduledNotifications() {
     console.log('[Mock] Would cancel all scheduled notifications');
     await Notifications.cancelAllScheduledNotificationsAsync();
     return { success: true, cancelled: 'all' };
   }
 
-  // Get notification permissions status (mock)
+  // Development data
   async getPermissionStatus() {
     const { status } = await Notifications.getPermissionsAsync();
     console.log(`[Mock] Permission status: ${status}`);

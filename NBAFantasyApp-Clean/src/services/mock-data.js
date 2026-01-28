@@ -1,4 +1,4 @@
-// Mock data for offline fallback
+// Development data
 export const mockPlayers = [
   {
     id: 1,

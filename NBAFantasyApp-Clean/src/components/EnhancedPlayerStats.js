@@ -17,7 +17,7 @@ const EnhancedPlayerStats = ({ playerName, season = '2024' }) => {
 
     setLoading(true);
     try {
-      // Mock data for demonstration
+      // Development data
       const mockStats = {
         name: playerName,
         team: 'GSW',

@@ -1,111 +1,69 @@
-// src/services/analytics.js
-import { Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// React Native compatible analytics service
+// Firebase Analytics doesn't work in React Native, so we use this alternative
 
-// Simple analytics service that works across platforms
 const AnalyticsService = {
-  // Initialize analytics
-  async init() {
-    console.log('📊 Analytics service initialized for platform:', Platform.OS);
+  // Check if we're in a compatible environment
+  isSupported() {
+    // Firebase Analytics only works in web environment
+    return typeof window !== 'undefined' && window.location;
   },
 
-  // Log an event
-  async logEvent(eventName, eventParams = {}) {
-    try {
-      const eventData = {
-        event: eventName,
-        params: eventParams,
-        timestamp: new Date().toISOString(),
-        platform: Platform.OS,
-        appVersion: '1.0.0',
-      };
-
-      // Log to console for debugging
-      console.log(`📊 Analytics Event: ${eventName}`, eventParams);
-
-      // Store locally in AsyncStorage
+  // Initialize analytics (no-op for React Native)
+  async initialize() {
+    if (this.isSupported()) {
       try {
-        const existingEvents = JSON.parse(await AsyncStorage.getItem('analytics_events') || '[]');
-        existingEvents.push(eventData);
-        
-        // Keep only last 100 events
-        if (existingEvents.length > 100) {
-          existingEvents.splice(0, existingEvents.length - 100);
-        }
-        
-        await AsyncStorage.setItem('analytics_events', JSON.stringify(existingEvents));
-      } catch (storageError) {
-        console.warn('Could not save analytics event locally:', storageError);
+        const { initializeApp } = await import('firebase/app');
+        const { getAnalytics } = await import('firebase/analytics');
+        // Note: We don't actually initialize here since Firebase is already initialized
+        console.log('Analytics would be available in web environment');
+        return true;
+      } catch (error) {
+        console.log('Analytics not available:', error.message);
+        return false;
       }
-
-      // If on web, also send to Firebase
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        await this.sendToFirebase(eventName, eventParams);
-      }
-
-      return true;
-    } catch (error) {
-      console.warn('Analytics event failed:', error);
-      return false;
     }
+    console.log('Analytics not available in React Native/Expo Go');
+    return false;
   },
 
-  // Send to Firebase on web
-  async sendToFirebase(eventName, eventParams) {
-    try {
-      // Dynamic import for Firebase (web only)
-      const firebaseModule = await import('firebase/app');
-      const analyticsModule = await import('firebase/analytics');
-      
-      // Check if Firebase is initialized
-      if (!firebaseModule.getApps().length) {
-        // Initialize Firebase with your config
-        const firebaseConfig = {
-          apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
-          authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
-          projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
-          storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
-          messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-          appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
-          measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID
-        };
-        
-        firebaseModule.initializeApp(firebaseConfig);
-      }
-      
-      const app = firebaseModule.getApp();
-      const analytics = analyticsModule.getAnalytics(app);
-      
-      if (analytics) {
-        await analyticsModule.logEvent(analytics, eventName, eventParams);
-        console.log('✅ Firebase analytics event sent:', eventName);
-      }
-    } catch (firebaseError) {
-      console.log('Firebase analytics not available on web:', firebaseError.message);
-    }
+  // Log event (console for development)
+  logEvent(name, params = {}) {
+    const eventData = {
+      event: name,
+      params,
+      timestamp: new Date().toISOString(),
+      platform: 'react-native',
+    };
+    
+    console.log('[Analytics Event]:', eventData);
+    
+    // In production, you might want to send these to your own backend
+    // or use a React Native analytics solution like:
+    // - @segment/analytics-react-native
+    // - react-native-firebase/analytics (requires native setup)
+    
+    return Promise.resolve();
   },
 
-  // Get all stored events
-  async getEvents() {
-    try {
-      const events = await AsyncStorage.getItem('analytics_events');
-      return events ? JSON.parse(events) : [];
-    } catch (error) {
-      console.warn('Could not get analytics events:', error);
-      return [];
-    }
+  // Screen view tracking
+  logScreenView(screenName, params = {}) {
+    return this.logEvent('screen_view', {
+      screen_name: screenName,
+      ...params,
+    });
   },
 
-  // Clear all events
-  async clearEvents() {
-    try {
-      await AsyncStorage.removeItem('analytics_events');
-      return true;
-    } catch (error) {
-      console.warn('Could not clear analytics events:', error);
-      return false;
-    }
-  }
+  // Set user properties
+  setUserProperty(name, value) {
+    console.log(`[User Property]: ${name} = ${value}`);
+    return Promise.resolve();
+  },
+
+  // Set user ID
+  setUserId(userId) {
+    console.log(`[User ID]: ${userId}`);
+    return Promise.resolve();
+  },
 };
 
 export default AnalyticsService;

@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/HomeScreen.js - UPDATED WITH LOGOUT FUNCTIONALITY
 import React, { useState, useEffect } from 'react';
 import { 
@@ -6,7 +7,6 @@ import {
   StyleSheet, 
   ScrollView, 
   TouchableOpacity, 
-  SafeAreaView,
   Dimensions,
   Platform,
   StatusBar,

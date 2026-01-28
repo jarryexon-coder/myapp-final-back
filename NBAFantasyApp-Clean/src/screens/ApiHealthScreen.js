@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/ApiHealthScreen.js - Updated for your backend
 import React, { useState, useEffect } from 'react';
 import {

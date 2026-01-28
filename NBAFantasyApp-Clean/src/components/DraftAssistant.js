@@ -117,7 +117,7 @@ const DraftAssistant = () => {
   const generateMockPlayerPool = () => {
     const pool = [];
     
-    // Generate mock players
+    // Development data
     ['QB', 'RB', 'WR', 'TE'].forEach(position => {
       playerTiers[position].forEach(player => {
         pool.push({

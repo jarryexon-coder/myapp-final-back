@@ -1,7 +1,7 @@
 import RevenueCatService from '../revenuecat-service';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Mock React Native Purchases
+// Development data
 jest.mock('react-native-purchases', () => ({
   configure: jest.fn(),
   getOfferings: jest.fn(),
@@ -27,7 +27,7 @@ describe('RevenueCatService', () => {
     });
 
     it('should handle initialization errors', async () => {
-      // Mock a failure
+      // Development data
       const mockPurchases = require('react-native-purchases');
       mockPurchases.configure.mockRejectedValue(new Error('Configuration failed'));
       

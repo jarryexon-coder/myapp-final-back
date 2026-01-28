@@ -7,7 +7,7 @@ export default function BettingScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Enhanced mock data
+    // Development data
     const mockBets = [
       { id: 1, game: 'Lakers vs Warriors', bet: 'Lakers -5.5', odds: '-110', amount: '$100', status: 'active', potentialWin: '$190' },
       { id: 2, game: 'Celtics vs Heat', bet: 'Over 215.5', odds: '+105', amount: '$50', status: 'active', potentialWin: '$102.50' },

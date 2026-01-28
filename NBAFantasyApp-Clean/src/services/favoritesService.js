@@ -4,7 +4,7 @@ export const favoritesService = {
   // Get user favorites
   getFavorites: async (userId) => {
     try {
-      // Mock implementation - replace with actual endpoint when available
+      // Development data
       console.log('📋 Getting favorites for user:', userId);
       return { success: true, data: [], message: 'Favorites service connected via tunnel' };
     } catch (error) {
@@ -16,7 +16,7 @@ export const favoritesService = {
   // Add to favorites
   addFavorite: async (userId, playerId) => {
     try {
-      // Mock implementation
+      // Development data
       console.log('➕ Adding favorite for user:', userId, 'player:', playerId);
       return { success: true, message: 'Favorite added via tunnel' };
     } catch (error) {
@@ -28,7 +28,7 @@ export const favoritesService = {
   // Remove from favorites
   removeFavorite: async (userId, playerId) => {
     try {
-      // Mock implementation
+      // Development data
       console.log('➖ Removing favorite for user:', userId, 'player:', playerId);
       return { success: true, message: 'Favorite removed via tunnel' };
     } catch (error) {

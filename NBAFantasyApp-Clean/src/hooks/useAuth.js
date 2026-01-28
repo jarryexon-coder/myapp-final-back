@@ -17,7 +17,7 @@ export const AuthProvider = ({ children }) => {
 
   const checkAuthStatus = async () => {
     try {
-      // Mock: Check for stored user
+      // Development data
       setTimeout(() => {
         setUser(null); // Start with no user
         setIsAuthenticated(false);
@@ -35,7 +35,7 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     setLoading(true);
     try {
-      // Mock API call
+      // Development data
       await new Promise(resolve => setTimeout(resolve, 1000));
       
       // In a real app, validate with backend
@@ -66,7 +66,7 @@ export const AuthProvider = ({ children }) => {
   const signup = async (email, password, name) => {
     setLoading(true);
     try {
-      // Mock API call
+      // Development data
       await new Promise(resolve => setTimeout(resolve, 1000));
       
       const mockUser = {
@@ -92,7 +92,7 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     setLoading(true);
     try {
-      // Mock API call
+      // Development data
       await new Promise(resolve => setTimeout(resolve, 500));
       
       setUser(null);

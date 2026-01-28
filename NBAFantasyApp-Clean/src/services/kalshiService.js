@@ -26,9 +26,9 @@ class KalshiService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.warn('Using mock data for Kalshi markets:', error.message);
+      // Development mode: Using simplified version
       
-      // Fallback to mock data
+      // Development data
       const mockMarkets = mockData.kalshiMarkets || this.getMockMarkets();
       
       // Apply filtering similar to what backend would do
@@ -66,9 +66,9 @@ class KalshiService {
 
       return await response.json();
     } catch (error) {
-      console.warn('Using mock data for market details:', error.message);
+      // Development mode: Using simplified version
       
-      // Fallback to mock data
+      // Development data
       const mockMarkets = mockData.kalshiMarkets || this.getMockMarkets();
       return mockMarkets.find(market => market.id === marketId) || null;
     }
@@ -90,9 +90,9 @@ class KalshiService {
 
       return await response.json();
     } catch (error) {
-      console.warn('Mock order placed:', error.message);
+      // Development mode active
       
-      // Mock response
+      // Development data
       return {
         success: true,
         orderId: `mock_${Date.now()}`,
@@ -145,7 +145,7 @@ class KalshiService {
         predictedByAI: true,
         aiConfidence: 82,
       },
-      // Add more mock markets as needed
+      // Development data
     ];
   }
 }

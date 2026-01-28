@@ -2,7 +2,7 @@
 import { fetchFromBackend } from '../config/api';
 
 class NewsService {
-  // Try backend first, fallback to mock data
+  // Development data
   async fetchLatestNews() {
     try {
       // Try actual backend (might return 404)
@@ -12,7 +12,7 @@ class NewsService {
       console.log('News endpoint not available, using fallback');
     }
     
-    // Fallback mock news
+    // Development data
     return this.getMockNews();
   }
   
@@ -46,7 +46,7 @@ class NewsService {
       console.error(`❌ ${sport} News API Error:`, error.message);
     }
     
-    // Filter mock news by sport
+    // Development data
     const mockNews = this.getMockNews();
     return mockNews
       .filter(article => article.sport === sport)
@@ -194,7 +194,7 @@ class NewsService {
           endpoint: ep.description,
           status: '❌ Unavailable',
           error: error.message,
-          fallback: 'Using mock data'
+          fallback: 'Development data'
         });
       }
     }

@@ -1,4 +1,5 @@
-// Add these mock functions at the top of the file:
+import { SafeAreaView } from 'react-native-safe-area-context';
+// Development data
 const logAnalyticsEvent = async (eventName, params = {}) => {
   console.log(`📊 Analytics Event: ${eventName}`, params);
 };
@@ -21,7 +22,6 @@ import {
   Dimensions,
   Platform,
   Alert,
-  SafeAreaView,
   FlatList,
   StatusBar,
   TextInput
@@ -79,7 +79,7 @@ export default function LiveGamesScreen({ navigation, route }) { // Added route 
   
   const sports = ['all', 'NBA', 'NFL', 'NHL', 'MLB'];
 
-  // Enhanced mock data with more realistic live games for each sport
+  // Development data
   const mockGamesData = {
     all: [
       {

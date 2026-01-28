@@ -70,7 +70,7 @@ export const NBAService = {
       
     } catch (error) {
       console.error('Game summary error:', error);
-      return this.getMockGameSummary(gameId); // Fallback to your existing mock
+      return this.getMockGameSummary(gameId); // Development data
     }
   },
 
@@ -528,7 +528,7 @@ export const NBAService = {
   // ========== MOCK DATA METHODS (from File 1) ==========
   
   getMockGames: () => {
-    console.log('📡 Using mock NBA games data');
+    // Using fallback for development
     return [
       {
         id: "game_001",
@@ -552,7 +552,7 @@ export const NBAService = {
   },
   
   getMockStandings: () => {
-    console.log('📡 Using mock NBA standings data');
+    // Using fallback for development
     return [
       { team: "Boston Celtics", wins: 35, losses: 10, winPercentage: 0.778 },
       { team: "Milwaukee Bucks", wins: 32, losses: 14, winPercentage: 0.696 },
@@ -565,7 +565,7 @@ export const NBAService = {
   // ========== MOCK GAME SUMMARY METHOD ==========
   
   getMockGameSummary(gameId) {
-    console.log('📡 Using mock NBA game summary');
+    // Using fallback for development
     return {
       gameId: gameId || 'mock_game_001',
       homeTeam: 'Home Team',

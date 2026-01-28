@@ -1408,7 +1408,7 @@ export default function DailyPicksScreen({ route }) {
     </View>
   );
 
-  // Mock data - Completely different from PredictionsScreen
+  // Development data
   const mockPicks = [
     {
       id: '1',

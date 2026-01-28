@@ -17,7 +17,7 @@ export const liveGamesService = {
   getGameDetails: async (gameId) => {
     try {
       console.log('📊 Fetching game details for:', gameId);
-      // Mock implementation
+      // Development data
       return { 
         success: true, 
         data: { 

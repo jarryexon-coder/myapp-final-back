@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/pages/HomePage.js
 import React, { useState, useEffect } from 'react';
 import { 

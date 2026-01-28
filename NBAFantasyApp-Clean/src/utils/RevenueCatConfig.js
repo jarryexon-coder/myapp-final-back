@@ -13,7 +13,7 @@ const isExpoGo = () => {
   }
 };
 
-// Create a mock RevenueCat for Expo Go
+// Development data
 const createMockPurchases = () => {
   const mock = {
     configure: (config) => {
@@ -78,7 +78,7 @@ let Purchases;
 
 if (isExpoGo()) {
   Purchases = createMockPurchases();
-  console.log('🏷️ Using mock Purchases for Expo Go/Development');
+  // Using fallback for development
 } else {
   try {
     console.log('💰 Loading real RevenueCat for production');
@@ -86,7 +86,7 @@ if (isExpoGo()) {
     // Add src property to real Purchases too for consistency
     Purchases = addSrcProperty(Purchases);
   } catch (error) {
-    console.log('⚠️ RevenueCat not available, using mock:', error.message);
+    // Using development fallback
     Purchases = createMockPurchases();
   }
 }

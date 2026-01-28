@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/HomeScreen-working.js - UPDATED WITH NEW SCREEN NAMES AND ORDER
 import React from 'react';
 import { 

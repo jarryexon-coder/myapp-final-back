@@ -1050,7 +1050,7 @@ export default function PredictionsScreen({ route, navigation }) {
     initializeData();
   }, []);
 
-  // Mock prediction data
+  // Development data
   const mockPredictions = [
     {
       id: '1',

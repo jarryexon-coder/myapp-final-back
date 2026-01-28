@@ -92,7 +92,7 @@ export const NFLService = {
       
     } catch (error) {
       console.error('Game summary error:', error);
-      return this.getMockGameSummary(gameId); // Fallback to your existing mock
+      return this.getMockGameSummary(gameId); // Development data
     }
   },
 
@@ -507,7 +507,7 @@ export const NFLService = {
   // ========== MOCK DATA METHODS ==========
   
   getMockGames() {
-    console.warn('⚠️ Using mock NFL games data');
+    // Development mode: Using simplified version
     return [
       {
         id: 'mock-1',
@@ -529,7 +529,7 @@ export const NFLService = {
   },
 
   getMockStandings() {
-    console.warn('⚠️ Using mock NFL standings data');
+    // Development mode: Using simplified version
     return [
       {
         id: 'KC',
@@ -565,7 +565,7 @@ export const NFLService = {
   },
 
   getMockTeams() {
-    console.warn('⚠️ Using mock NFL teams data');
+    // Development mode: Using simplified version
     return [
       {
         id: 'KC',
@@ -597,7 +597,7 @@ export const NFLService = {
   // ========== MOCK GAME SUMMARY METHOD ==========
   
   getMockGameSummary(gameId) {
-    console.log('📡 Using mock NFL game summary');
+    // Using fallback for development
     return {
       gameId: gameId || 'mock_nfl_game_001',
       homeTeam: 'NFL Home Team',

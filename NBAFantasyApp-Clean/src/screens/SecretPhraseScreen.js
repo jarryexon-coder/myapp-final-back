@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/SecretPhraseScreen.js - UPDATED WITH SEARCH FUNCTIONALITY
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearch } from "../providers/SearchProvider";import {
@@ -9,7 +10,6 @@ import { useSearch } from "../providers/SearchProvider";import {
   ActivityIndicator,
   RefreshControl,
   TouchableOpacity,
-  SafeAreaView,
   TextInput,
   Dimensions,
   Modal,

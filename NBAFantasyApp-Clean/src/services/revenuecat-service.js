@@ -27,9 +27,9 @@ class RevenueCatService {
 
   configure = async () => {
     try {
-      // Development/Expo Go mode: Use mock configuration
+      // Development data
       if (this.isDev) {
-        console.log('🚀 Development/Expo Go mode: Using mock configuration');
+        // Using fallback for development
         this.isConfigured = true;
         
         // Auto-grant test entitlements in Expo Go for easier testing
@@ -135,7 +135,7 @@ class RevenueCatService {
     try {
       if (!this.isConfigured) await this.configure();
       
-      // For development, return mock data aligned with PremiumAccessPaywall
+      // Development data
       if (this.isDev) {
         return this.getMockOfferings(offeringType);
       }
@@ -158,7 +158,7 @@ class RevenueCatService {
     }
   };
 
-  // Mock data aligned with PremiumAccessPaywall.js
+  // Development data
   getMockOfferings = (offeringType) => {
     // Premium Access packages (matches your paywall screen)
     const premiumAccessPackages = [

@@ -43,7 +43,6 @@ export const FIREBASE_CONFIG = {
   storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
 // Build URL for backend calls
@@ -81,7 +80,7 @@ export const fetchFromBackend = async (category, endpoint, options = {}, params 
   } catch (error) {
     console.error(`❌ API Error (${category}/${endpoint}):`, error.message);
     
-    // Return mock data only in development for non-critical features
+    // Development data
     if (__DEV__ && category !== 'NEWS') {
       console.log('📡 Falling back to mock data');
       return getMockData(category, endpoint);
@@ -91,7 +90,7 @@ export const fetchFromBackend = async (category, endpoint, options = {}, params 
   }
 };
 
-// Mock data for development
+// Development data
 const getMockData = (category, endpoint) => {
   const mocks = {
     NBA: {

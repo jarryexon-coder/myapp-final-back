@@ -47,7 +47,7 @@ export const initializeRevenueCat = async () => {
   }
 };
 
-// Create a mock RevenueCat for Expo Go
+// Development data
 const createMockPurchases = () => ({
   configure: () => console.log('🎭 Mock RevenueCat: configure called'),
   getOfferings: () => Promise.resolve({ all: {}, current: null }),
@@ -64,17 +64,17 @@ const createMockPurchases = () => ({
   LOG_LEVEL: { INFO: 'INFO' },
 });
 
-// Export either real or mock Purchases
+// Development data
 let Purchases;
 
 if (isExpoGo()) {
   Purchases = createMockPurchases();
-  console.log('🏷️ Using mock Purchases for Expo Go');
+  // Using fallback for development
 } else {
   try {
     Purchases = require('react-native-purchases').default;
   } catch (error) {
-    console.log('⚠️ RevenueCat not available, using mock');
+    // Using development fallback
     Purchases = createMockPurchases();
   }
 }

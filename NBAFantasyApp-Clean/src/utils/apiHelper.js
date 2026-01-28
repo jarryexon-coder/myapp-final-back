@@ -12,7 +12,7 @@ export const fetchWithFallback = async (apiCall, fallbackData, errorMessage = 'A
   }
 };
 
-// Mock data generators
+// Development data
 export const mockPlayers = [
   {
     id: 1,

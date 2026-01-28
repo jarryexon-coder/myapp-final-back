@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/NHLScreen-simple.js
 import React, { useState } from 'react';
 import { 

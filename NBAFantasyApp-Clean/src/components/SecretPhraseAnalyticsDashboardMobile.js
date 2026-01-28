@@ -32,7 +32,7 @@ const SecretPhraseAnalyticsDashboardMobile = () => {
       // const response = await fetch('YOUR_API_URL/secret-phrase-analytics');
       // const data = await response.json();
       
-      // Mock data for now
+      // Development data
       const mockData = {
         todaysStats: {
           todaysEvents: 12,

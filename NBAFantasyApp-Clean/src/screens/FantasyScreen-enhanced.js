@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator,
@@ -36,14 +37,13 @@ const logAnalyticsEvent = async (eventName, eventParams = {}) => {
       try {
 //        const firebaseApp = await import('firebase/app');
           
-//          app = firebaseApp.initializeApp(firebaseConfig);
         } else {
 //          app = firebaseApp.getApp();
         }
         
-        const analytics = firebaseAnalytics.getAnalytics(app);
+        const analytics = firebaseAnalytics.;
         if (analytics) {
-          await firebaseAnalytics.logEvent(analytics, eventName, eventParams);
+          await firebaseAnalytics.logEvent(eventName, eventParams);
         }
       } catch (firebaseError) {
         // }
@@ -207,7 +207,7 @@ export default function FantasyScreen() {
         budget: budget,
       });
       
-      // Mock data for demonstration
+      // Development data
       const mockTeam = [
         { 
           id: 1, 

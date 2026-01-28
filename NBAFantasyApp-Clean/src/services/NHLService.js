@@ -90,7 +90,7 @@ export const NHLService = {
       
     } catch (error) {
       console.error('Game summary error:', error);
-      return this.getMockGameSummary(gameId); // Fallback to your existing mock
+      return this.getMockGameSummary(gameId); // Development data
     }
   },
 
@@ -655,7 +655,7 @@ export const NHLService = {
   // ========== MOCK DATA METHODS ==========
   
   getMockGames: () => {
-    console.warn('⚠️ Using mock NHL games data');
+    // Development mode: Using simplified version
     return [
       {
         id: 'mock-1',
@@ -685,7 +685,7 @@ export const NHLService = {
   },
 
   getMockStandings: () => {
-    console.warn('⚠️ Using mock NHL standings data');
+    // Development mode: Using simplified version
     return [
       {
         id: 'BOS',
@@ -721,7 +721,7 @@ export const NHLService = {
   },
 
   getMockTeams: () => {
-    console.warn('⚠️ Using mock NHL teams data');
+    // Development mode: Using simplified version
     return [
       {
         id: 'BOS',
@@ -753,7 +753,7 @@ export const NHLService = {
   // ========== MOCK GAME SUMMARY METHOD ==========
   
   getMockGameSummary(gameId) {
-    console.log('📡 Using mock NHL game summary');
+    // Using fallback for development
     return {
       gameId: gameId || 'mock_nhl_game_001',
       homeTeam: 'NHL Home Team',

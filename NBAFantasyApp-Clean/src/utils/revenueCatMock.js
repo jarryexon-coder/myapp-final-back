@@ -1,4 +1,4 @@
-// src/utils/revenueCatMock.js
+// Development data
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
@@ -42,5 +42,5 @@ export const createMockPurchases = () => ({
   LOG_LEVEL: { INFO: 'INFO', DEBUG: 'DEBUG', WARN: 'WARN', ERROR: 'ERROR' },
 });
 
-// Export mock for use in other files
+// Development data
 export default createMockPurchases();

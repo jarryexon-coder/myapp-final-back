@@ -17,7 +17,7 @@ import { Dimensions } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
-// Mock Kalshi data
+// Development data
 const mockMarkets = [
   {
     id: 'sp500_5000_2024',

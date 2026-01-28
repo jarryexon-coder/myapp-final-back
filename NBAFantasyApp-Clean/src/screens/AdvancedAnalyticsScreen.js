@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/AdvancedAnalyticsScreen.js - ENHANCED WITH PREDICTION GENERATORS
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -10,7 +11,6 @@ import {
   RefreshControl,
   TouchableOpacity,
   Dimensions,
-  SafeAreaView,
   Modal,
   Alert,
   TextInput,

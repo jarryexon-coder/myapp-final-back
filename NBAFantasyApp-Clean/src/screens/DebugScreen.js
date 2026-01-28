@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/DebugScreen.js
 import React from 'react';
 import {

@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/PrizePicksScreen.js - UPDATED FOR 3 WINNERS PER SELECTION, 2 SELECTIONS PER DAY
 import React, { useState, useEffect } from 'react';
 import {
@@ -15,7 +16,6 @@ import {
   Platform,
   Alert,
   Clipboard,
-  SafeAreaView
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -770,7 +770,7 @@ export default function PrizePicksScreen() {
   const [dailySelectionsLeft, setDailySelectionsLeft] = useState(2);
   const [todaySelections, setTodaySelections] = useState([]);
   
-  // Updated mock data with 3-winner selections
+  // Development data
   const mockSelections = [
     {
       id: '1',

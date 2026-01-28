@@ -1,10 +1,10 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/GameDetailsScreen.js - FIXED VERSION
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   RefreshControl,

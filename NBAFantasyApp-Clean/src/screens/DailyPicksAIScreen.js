@@ -19,7 +19,7 @@ const { width } = Dimensions.get('window');
 // Simple Firebase helper
 const logFirebaseEvent = async (eventName, eventParams = {}) => {
   try {
-    // Mock implementation
+    // Development data
     if (__DEV__) {
       // }
     

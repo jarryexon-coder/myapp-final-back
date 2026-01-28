@@ -1041,7 +1041,7 @@ const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();
     }
   };
 
-  // Mock news data with real Kalshi context
+  // Development data
   const kalshiNews = [
     {
       id: '1',
@@ -1146,7 +1146,7 @@ const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();
     } catch (error) {
       console.error('Error loading Kalshi predictions:', error);
       
-      // Fallback to mock data if real API fails
+      // Development data
       try {
         const predictions = filterSampleData(searchQuery, selectedMarket);
         setKalshiPredictions(predictions);

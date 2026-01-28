@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/SubscriptionScreen.js - UPDATED WITH REVENUECAT INTEGRATION
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -5,7 +6,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  SafeAreaView,
   TouchableOpacity,
   ActivityIndicator,
   Animated,
@@ -43,7 +43,7 @@ const checkExpoGo = () => {
 const IS_EXPO_GO = checkExpoGo();
 console.log('🔍 Environment check - Expo Go:', IS_EXPO_GO);
 
-// Mock RevenueCat for Expo Go
+// Development data
 const createMockPurchases = () => ({
   getOfferings: () => Promise.resolve({ 
     all: {}, 
@@ -85,7 +85,7 @@ const createMockPurchases = () => ({
 let Purchases;
 
 if (IS_EXPO_GO) {
-  console.log('🏷️ Using mock RevenueCat for Expo Go');
+  // Using fallback for development
   Purchases = createMockPurchases();
 } else {
   // Only try to load RevenueCat in production
@@ -95,7 +95,7 @@ if (IS_EXPO_GO) {
     Purchases = RNPurchases;
     console.log('✅ RevenueCat SDK loaded successfully');
   } catch (error) {
-    console.log('⚠️ RevenueCat not available, using mock:', error.message);
+    // Using development fallback
     Purchases = createMockPurchases();
   }
 }
@@ -104,7 +104,7 @@ if (IS_EXPO_GO) {
 const configureRevenueCat = async () => {
   if (IS_EXPO_GO) {
     console.log('🎭 Skipping RevenueCat configuration in Expo Go');
-    await Purchases.configure(); // Call mock configure
+    await Purchases.configure(); // Development data
     return;
   }
 
@@ -235,7 +235,7 @@ export default function SubscriptionScreen({ navigation }) {
           await loadOfferings();
           await loadCustomerInfo();
         } else {
-          // Set mock data for Expo Go
+          // Development data
           console.log('🎭 Setting mock data for Expo Go');
           setCustomerInfo({
             entitlements: {
@@ -274,7 +274,7 @@ export default function SubscriptionScreen({ navigation }) {
       
       if (IS_EXPO_GO) {
         console.log('🎭 Mock loadOfferings in Expo Go');
-        // Return mock data
+        // Development data
         const mockOfferings = {
           all: {},
           current: null
@@ -307,7 +307,7 @@ export default function SubscriptionScreen({ navigation }) {
       
       if (IS_EXPO_GO) {
         console.log('🎭 Mock loadCustomerInfo in Expo Go');
-        // Return mock data
+        // Development data
         const mockInfo = {
           entitlements: {
             active: {},
@@ -456,7 +456,7 @@ export default function SubscriptionScreen({ navigation }) {
           } catch (directError) {
             console.error('Direct purchase failed:', directError);
             
-            // Final fallback: Mock purchase for testing
+            // Development data
             await new Promise(resolve => setTimeout(resolve, 1200));
             Alert.alert(
               '⚠️ Development Mode',

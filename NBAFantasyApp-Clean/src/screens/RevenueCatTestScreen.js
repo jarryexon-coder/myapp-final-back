@@ -1,3 +1,4 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 // src/screens/RevenueCatTestScreen.js
 import React, { useState } from 'react';
 import {

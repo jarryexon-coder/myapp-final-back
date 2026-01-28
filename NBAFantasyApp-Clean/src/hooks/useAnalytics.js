@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { Platform } from 'react-native';
-import { AnalyticsService } from '../services/firebase';
+import { analyticsService } from '../services/analytics-service';
 
 export const useAnalytics = () => {
   const logEvent = useCallback(async (eventName, eventParams = {}) => {
@@ -12,7 +12,7 @@ export const useAnalytics = () => {
       userId: 'anonymous',
     };
 
-    return AnalyticsService.logEvent(eventName, enhancedParams);
+    return analyticsService.logEvent(eventName, enhancedParams);
   }, []);
 
   const logNavigation = useCallback(async (screenName, params = {}) => {
@@ -35,7 +35,7 @@ export const useAnalytics = () => {
     logEvent,
     logNavigation,
     logSecretPhrase,
-    getEvents: AnalyticsService.getEvents,
-    clearEvents: AnalyticsService.clearEvents,
+    getEvents: analyticsService.getEvents,
+    clearEvents: analyticsService.clearEvents,
   };
 };

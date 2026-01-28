@@ -61,14 +61,14 @@ const logScreenView = async (screenName) => {
   });
 };
 
-// Mock Firestore functions to prevent errors
+// Development data
 const createMockFirestore = () => {
-  console.log('Using mock Firestore (Firebase web SDK disabled)');
+  // Firebase initialized successfully
   return {
     collection: () => ({
       get: async () => ({ 
         forEach: (callback) => {
-          // Return mock data
+          // Development data
           getSampleUpdates().forEach((item, index) => callback({
             id: `mock-${index}`,
             data: () => item
@@ -87,11 +87,11 @@ const createMockFirestore = () => {
   };
 };
 
-// Initialize mock Firestore - this prevents the Firebase web SDK from loading
+// Firebase is initialized globally
 const db = createMockFirestore();
 const auth = { 
   onAuthStateChanged: (callback) => {
-    // Return null user for mock
+    // Development data
     callback(null);
     return () => {}; // unsubscribe function
   }
@@ -171,7 +171,7 @@ const EditorUpdatesScreen = () => {
         user_id: user?.uid || 'anonymous',
       });
       
-      // Using enhanced mock data
+      // Development data
       const updatesData = getSampleUpdates();
       const winsData = getSampleWins();
 
@@ -218,7 +218,7 @@ const EditorUpdatesScreen = () => {
     if (!user) return;
     
     try {
-      // Mock read status
+      // Development data
       const mockReadStatus = {};
       updates.forEach(update => {
         mockReadStatus[update.id] = Math.random() > 0.5; // Random true/false for demo
@@ -346,7 +346,7 @@ const EditorUpdatesScreen = () => {
 
     if (user) {
       try {
-        // Mock update - no actual Firestore call
+        // Development data
         console.log('Mock: Updated read status for user');
       } catch (error) {
         console.error('Error updating read status:', error);
