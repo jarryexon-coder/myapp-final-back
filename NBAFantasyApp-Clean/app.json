@@ -21,6 +21,12 @@
     "plugins": [
       "expo-asset",
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "32c4727b-948c-4e8b-8313-9ca5d488f43c"
+      }
+    },
+    "owner": "jerryjiya"
   }
 }
